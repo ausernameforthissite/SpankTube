@@ -1,0 +1,10 @@
+.git
+.idea
+.tooling
+**/build
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.tsbuildinfo
+deploy/rendered

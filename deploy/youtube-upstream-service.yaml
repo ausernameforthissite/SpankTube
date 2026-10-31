@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: youtube-upstream-service
+  namespace: spanktube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: youtube-upstream-service
+  template:
+    metadata:
+      labels:
+        app: youtube-upstream-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: youtube-upstream-service
+          image: registry.local/spanktube/youtube-upstream-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: spanktube-egress
+            - secretRef:
+                name: spanktube-egress
+          env:
+            - name: REDIS_HOST
+              value: redis
+            - name: HOME
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: youtube-upstream-service
+  namespace: spanktube
+spec:
+  selector:
+    app: youtube-upstream-service
+  ports:
+    - port: 8081
+      targetPort: 8081

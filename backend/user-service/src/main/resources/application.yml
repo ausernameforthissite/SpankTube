@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:8083}
+
+spring:
+  application:
+    name: user-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+spanktube:
+  auth:
+    issuer: ${JWT_ISSUER:spanktube}
+    private-key: ${JWT_PRIVATE_KEY:}
+    public-key: ${JWT_PUBLIC_KEY:}
+    access-token-ttl: PT15M
+    refresh-token-ttl: P30D
+    users:
+      viewer:
+        password-hash: ${VIEWER_PASSWORD_HASH:}
+        role: VIEWER
+      admin:
+        password-hash: ${ADMIN_PASSWORD_HASH:}
+        role: ADMIN

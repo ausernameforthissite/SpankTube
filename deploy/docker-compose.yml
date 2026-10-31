@@ -1,0 +1,108 @@
+x-egress-environment: &egress-environment
+  EGRESS_MODE: socks5
+  EGRESS_HOST: ${EGRESS_HOST:?set EGRESS_HOST}
+  EGRESS_PORT: ${EGRESS_PORT:-1080}
+  EGRESS_USERNAME: ${EGRESS_USERNAME:?set EGRESS_USERNAME}
+  EGRESS_PASSWORD: ${EGRESS_PASSWORD:?set EGRESS_PASSWORD}
+  EGRESS_REMOTE_DNS: "true"
+
+x-backend-build-args: &backend-build-args
+  GRADLE_EXTRA_ARGS: ${GRADLE_EXTRA_ARGS:-}
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  user-service:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        <<: *backend-build-args
+        SERVICE: user-service
+    image: spanktube/user-service:0.1.0
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx256m
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?set JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY}
+      VIEWER_PASSWORD_HASH: ${VIEWER_PASSWORD_HASH:?set VIEWER_PASSWORD_HASH}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?set ADMIN_PASSWORD_HASH}
+    ports:
+      - "127.0.0.1:8083:8083"
+
+  youtube-upstream-service:
+    build:
+      context: ..
+      dockerfile: backend/youtube-upstream-service/Dockerfile
+      args: *backend-build-args
+    image: spanktube/youtube-upstream-service:0.1.0
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *egress-environment
+      JAVA_TOOL_OPTIONS: -Xmx320m
+      REDIS_HOST: redis
+    ports:
+      - "127.0.0.1:8081:8081"
+
+  media-service:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        <<: *backend-build-args
+        SERVICE: media-service
+    image: spanktube/media-service:0.1.0
+    restart: unless-stopped
+    depends_on:
+      - youtube-upstream-service
+    environment:
+      <<: *egress-environment
+      JAVA_TOOL_OPTIONS: -Xmx320m
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
+    ports:
+      - "127.0.0.1:8082:8082"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        <<: *backend-build-args
+        SERVICE: gateway
+    image: spanktube/gateway:0.1.0
+    restart: unless-stopped
+    depends_on:
+      - user-service
+      - youtube-upstream-service
+      - media-service
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx256m
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY}
+      USER_SERVICE_URL: http://user-service:8083
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
+      MEDIA_SERVICE_URL: http://media-service:8082
+      CORS_ALLOWED_ORIGINS: ${WEB_ORIGIN:-http://192.168.88.172:8088}
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    image: spanktube/web:0.1.0
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "8088:8080"

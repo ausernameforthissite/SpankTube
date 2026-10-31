@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spanktube-egress
+  namespace: spanktube
+data:
+  EGRESS_MODE: "socks5"
+  EGRESS_HOST: ""
+  EGRESS_PORT: "1080"
+  EGRESS_REMOTE_DNS: "true"

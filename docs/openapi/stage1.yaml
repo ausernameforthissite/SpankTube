@@ -1,0 +1,265 @@
+openapi: 3.1.0
+info:
+  title: SpankTube Stage 1 API
+  version: 0.1.0
+paths:
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Error'
+  /api/v1/auth/refresh:
+    post:
+      operationId: refresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Tokens rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Error'
+  /api/v1/videos/{videoId}:
+    get:
+      operationId: getVideo
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+      responses:
+        '200':
+          description: Video metadata without upstream media URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '400':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /media/v/{videoId}/manifest.mpd:
+    get:
+      operationId: getManifest
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+      responses:
+        '200':
+          description: DASH manifest
+          content:
+            application/dash+xml:
+              schema:
+                type: string
+        '502':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /media/v/{videoId}/seg/{formatId}:
+    get:
+      operationId: getSegment
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - name: formatId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Complete media stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Media byte range
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /media/v/{videoId}/sub/{trackId}:
+    get:
+      operationId: getSubtitle
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: WebVTT subtitle track
+          content:
+            text/vtt:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    VideoId:
+      name: videoId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{11}$'
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    TokenPair:
+      type: object
+      required: [accessToken, tokenType, expiresIn, refreshToken, refreshExpiresIn, role]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          format: int64
+        refreshToken:
+          type: string
+        refreshExpiresIn:
+          type: integer
+          format: int64
+        role:
+          type: string
+          enum: [VIEWER, ADMIN]
+    Video:
+      type: object
+      required: [videoId, manifestUrl, formats, subtitles]
+      properties:
+        videoId:
+          type: string
+        title:
+          type: [string, 'null']
+        description:
+          type: [string, 'null']
+        channelId:
+          type: [string, 'null']
+        channelName:
+          type: [string, 'null']
+        durationSeconds:
+          type: [integer, 'null']
+          format: int64
+        viewCount:
+          type: [integer, 'null']
+          format: int64
+        likeCount:
+          type: [integer, 'null']
+          format: int64
+        publishedAt:
+          type: [string, 'null']
+        manifestUrl:
+          type: string
+        formats:
+          type: array
+          items:
+            $ref: '#/components/schemas/Format'
+        subtitles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subtitle'
+    Format:
+      type: object
+      required: [formatId, segmentUrl, hasVideo, hasAudio]
+      properties:
+        formatId:
+          type: string
+        mimeType:
+          type: [string, 'null']
+        codecs:
+          type: [string, 'null']
+        width:
+          type: [integer, 'null']
+        height:
+          type: [integer, 'null']
+        fps:
+          type: [number, 'null']
+        bitrate:
+          type: [integer, 'null']
+          format: int64
+        hasVideo:
+          type: boolean
+        hasAudio:
+          type: boolean
+        segmentUrl:
+          type: string
+    Subtitle:
+      type: object
+      required: [trackId, language, label, url]
+      properties:
+        trackId:
+          type: string
+        language:
+          type: string
+        label:
+          type: string
+        url:
+          type: string
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        actions:
+          type: array
+          items:
+            type: string
+security:
+  - bearerAuth: []

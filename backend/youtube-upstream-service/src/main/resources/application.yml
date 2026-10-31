@@ -1,0 +1,34 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: youtube-upstream-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+spanktube:
+  egress:
+    mode: ${EGRESS_MODE:socks5}
+    host: ${EGRESS_HOST:}
+    port: ${EGRESS_PORT:1080}
+    username: ${EGRESS_USERNAME:}
+    password: ${EGRESS_PASSWORD:}
+    remote-dns: ${EGRESS_REMOTE_DNS:true}
+    probe:
+      enabled: true
+      interval: 30s
+      timeout: 10s
+  yt-dlp:
+    executable: ${YT_DLP_EXECUTABLE:yt-dlp}
+    timeout: 60s
+    extra-args: ${YT_DLP_EXTRA_ARGS:}

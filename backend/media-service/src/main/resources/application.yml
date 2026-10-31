@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: media-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+spanktube:
+  media:
+    upstream-url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}
+  egress:
+    mode: ${EGRESS_MODE:socks5}
+    host: ${EGRESS_HOST:}
+    port: ${EGRESS_PORT:1080}
+    username: ${EGRESS_USERNAME:}
+    password: ${EGRESS_PASSWORD:}
+    remote-dns: ${EGRESS_REMOTE_DNS:true}
+    probe:
+      enabled: true
+      interval: 30s
+      timeout: 10s

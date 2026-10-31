@@ -1,0 +1,17 @@
+.gradle/
+.tooling/
+build/
+**/build/
+.idea/
+*.iml
+
+.env
+.env.*
+!.env.example
+local.properties
+
+node_modules/
+dist/
+*.tsbuildinfo
+
+deploy/rendered/
