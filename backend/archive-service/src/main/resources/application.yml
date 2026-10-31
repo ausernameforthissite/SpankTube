@@ -1,0 +1,23 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: archive-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:archive}
+    username: ${POSTGRES_USER:spanktube}
+    password: ${POSTGRES_PASSWORD:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+spanktube:
+  events:
+    enabled: ${EVENTS_ENABLED:true}
+    exchange: spanktube.events
+  archive:
+    root: ${ARCHIVE_ROOT:/archive}
