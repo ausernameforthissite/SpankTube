@@ -47,11 +47,13 @@ spanktube/
 8. **Upstream.** Весь доступ к YouTube — в youtube-upstream-service за интерфейсом `UpstreamProvider`: NewPipeExtractor (in-process), yt-dlp (sidecar), Data API v3 (только аккаунтные операции, квота 10k ед./день). PO-токены — через bgutil-pot-provider. Дизлайки — только Return YouTube Dislike, в API помечать как оценку.
 9. **Секреты.** Учётные данные danted, Google OAuth client secret, JWT-ключи, куки — только Kubernetes Secrets / переменные окружения. В коде и репозитории секретов нет.
 
-## Текущий этап: 1 — ядро просмотра
+## Текущий этап: 2 — архив и история
 
-Цель этапа — на реальном видео проверить два главных риска: антибот YouTube (PO-токены) и стриминг через SOCKS5.
+Этап 1 завершён и проверен на реальном видео в Docker: метаданные, DASH через SOCKS5, Range-сегменты и play/pause в Shaka.
 
-Скоуп: `egress-starter` (SOCKS5-клиент + проба `GET https://www.youtube.com/generate_204` с метрикой `upstream_egress_ok`), `user-service` (логин/JWT), `youtube-upstream-service` (метаданные + stream-URL), `media-service` (DASH-манифест + проксирование сегментов), минимальная веб-страница просмотра. Архив, подписки, комментарии и Android — НЕ входят в этап.
+Скоуп этапа 2: `catalog-service` (метаданные, SponsorBlock, RYD, история), `archive-service` (MKV на NFS, пакетные задачи, ACL), PostgreSQL, RabbitMQ только через собственный интерфейс издателя/подписчика, кнопка «Сохранить» и библиотека в web. Подписки, комментарии и Android — НЕ входят в этап.
+
+Правила из этапа 1: redirect только на разрешённые YouTube/googlevideo-хосты через тот же egress; DASH для MP4 строится по настоящему `sidx`, искусственные byte-range сегменты запрещены; `play()` вызывается только после завершения `player.load()`.
 
 ## Окружение
 
@@ -61,8 +63,8 @@ spanktube/
 
 ## Команды
 
-_Заполняется по мере появления каркаса:_
-
 - Сборка: `./gradlew build`
 - Тесты модуля: `./gradlew :backend:<module>:test`
 - Web: `cd web && npm run dev`
+- Docker Compose: `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build`
+- Offline-сборка при подготовленном BuildKit cache: `GRADLE_EXTRA_ARGS=--offline docker compose --env-file deploy/.env -f deploy/docker-compose.yml build`
