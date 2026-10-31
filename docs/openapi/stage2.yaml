@@ -1,0 +1,427 @@
+openapi: 3.1.0
+info:
+  title: SpankTube Stage 2 API
+  version: 0.2.0
+paths:
+  /api/v1/videos/{videoId}:
+    get:
+      operationId: getStage2Video
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '200':
+          description: Video with publication date and channel metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Video' }
+  /api/v1/search:
+    get:
+      operationId: searchStage2
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [videos, channels, playlists] }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: YouTube search results with proxied previews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResults' }
+  /api/v1/channels/{channelId}:
+    get:
+      operationId: getStage2Channel
+      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      responses:
+        '200':
+          description: Channel metadata and avatar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Channel' }
+  /api/v1/channels/{channelId}/videos:
+    get:
+      operationId: getStage2ChannelVideos
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Channel videos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResults' }
+  /api/v1/channels/{channelId}/playlists:
+    get:
+      operationId: getStage2ChannelPlaylists
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Channel playlists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResults' }
+  /api/v1/playlists/{playlistId}:
+    get:
+      operationId: getStage2Playlist
+      parameters: [{ $ref: '#/components/parameters/PlaylistId' }]
+      responses:
+        '200':
+          description: Playlist with previews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Playlist' }
+  /api/v1/home:
+    get:
+      operationId: getStage2Home
+      responses:
+        '200':
+          description: User subscriptions and hybrid recommendations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HomeResponse' }
+  /api/v1/library:
+    get:
+      operationId: getStage2Library
+      parameters:
+        - name: channelId
+          in: query
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [size, duration, title], default: size }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+      responses:
+        '200':
+          description: Current user's library grouped by channel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LibraryResponse' }
+  /api/v1/library/{videoId}:
+    delete:
+      operationId: deleteStage2LibraryItem
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '204':
+          description: User link removed; physical file removed only with the last link
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/library/{videoId}/file:
+    get:
+      operationId: downloadStage2LibraryFile
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '200':
+          description: MKV download on the user's device
+          content:
+            video/x-matroska:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/videos/{videoId}/save:
+    post:
+      operationId: saveStage2Video
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '202':
+          description: Persistent archive job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/playlists/{playlistId}/save:
+    post:
+      operationId: saveStage2Playlist
+      parameters: [{ $ref: '#/components/parameters/PlaylistId' }]
+      responses:
+        '202':
+          description: Batch archive job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/channels/{channelId}/save:
+    post:
+      operationId: saveStage2Channel
+      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      responses:
+        '202':
+          description: Batch archive job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/archive/jobs:
+    get:
+      operationId: getStage2ArchiveJobs
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [queued, running, completed, failed, cancelled] }
+      responses:
+        '200':
+          description: Archive jobs ordered by role priority and FIFO
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/admin/users:
+    get:
+      operationId: getStage2Users
+      responses:
+        '200':
+          description: Users and effective quotas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserQuota' }
+  /api/v1/admin/users/{username}/quota:
+    get:
+      operationId: getStage2UserQuota
+      parameters: [{ $ref: '#/components/parameters/Username' }]
+      responses:
+        '200':
+          description: Effective user quota
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserQuota' }
+    put:
+      operationId: setStage2UserQuota
+      parameters: [{ $ref: '#/components/parameters/Username' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaUpdate' }
+      responses:
+        '200':
+          description: Updated personal quota
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserQuota' }
+  /api/v1/admin/storage:
+    get:
+      operationId: getStage2Storage
+      responses:
+        '200':
+          description: NFS and per-user quota usage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageResponse' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    VideoId:
+      name: videoId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{11}$' }
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      schema: { type: string }
+    PlaylistId:
+      name: playlistId
+      in: path
+      required: true
+      schema: { type: string }
+    Username:
+      name: username
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    Channel:
+      type: object
+      required: [channelId, title, url, avatarUrl]
+      properties:
+        channelId: { type: string }
+        title: { type: string }
+        handle: { type: [string, 'null'] }
+        customPath: { type: [string, 'null'] }
+        url: { type: string, description: SpankTube route mirroring YouTube }
+        avatarUrl: { type: string, description: media-service URL }
+        subscriberCount: { type: [integer, 'null'], format: int64 }
+    Video:
+      type: object
+      required: [videoId, title, publishedAt, channel, manifestUrl, formats, sponsorBlock]
+      properties:
+        videoId: { type: string }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        publishedAt: { type: string }
+        durationSeconds: { type: [integer, 'null'], format: int64 }
+        channel: { $ref: '#/components/schemas/Channel' }
+        manifestUrl: { type: string }
+        formats:
+          type: array
+          items: { $ref: '#/components/schemas/Format' }
+        sponsorBlock:
+          type: array
+          items: { $ref: '#/components/schemas/SponsorSegment' }
+        dislikeCountEstimate: { type: [integer, 'null'], format: int64 }
+    Format:
+      type: object
+      required: [formatId, segmentUrl, hasVideo, hasAudio]
+      properties:
+        formatId: { type: string }
+        mimeType: { type: [string, 'null'] }
+        codecs: { type: [string, 'null'] }
+        height: { type: [integer, 'null'] }
+        hasVideo: { type: boolean }
+        hasAudio: { type: boolean }
+        segmentUrl: { type: string }
+    SponsorSegment:
+      type: object
+      required: [startSeconds, endSeconds, category]
+      properties:
+        startSeconds: { type: number }
+        endSeconds: { type: number }
+        category: { type: string }
+    SearchItem:
+      type: object
+      required: [kind, id, title, url, thumbnailUrl]
+      properties:
+        kind: { type: string, enum: [video, channel, playlist] }
+        id: { type: string }
+        title: { type: string }
+        url: { type: string, description: SpankTube route mirroring YouTube }
+        thumbnailUrl: { type: string, description: media-service URL }
+        channelName: { type: [string, 'null'] }
+        durationSeconds: { type: [integer, 'null'], format: int64 }
+        videoCount: { type: [integer, 'null'] }
+    SearchResults:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SearchItem' }
+        nextCursor: { type: [string, 'null'] }
+    Playlist:
+      type: object
+      required: [playlistId, title, items]
+      properties:
+        playlistId: { type: string }
+        title: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SearchItem' }
+        nextCursor: { type: [string, 'null'] }
+    HomeResponse:
+      type: object
+      required: [subscriptions, recommendations, recommendationSource]
+      properties:
+        subscriptions:
+          type: array
+          items: { $ref: '#/components/schemas/Channel' }
+        recommendations:
+          type: array
+          items: { $ref: '#/components/schemas/SearchItem' }
+        recommendationSource: { type: string, enum: [youtube, local] }
+    LibraryItem:
+      type: object
+      required: [videoId, title, durationSeconds, sizeBytes, sizeMB, downloadUrl, lastAccessedAt]
+      properties:
+        videoId: { type: string }
+        title: { type: string }
+        durationSeconds: { type: integer, format: int64 }
+        sizeBytes: { type: integer, format: int64 }
+        sizeMB: { type: number }
+        downloadUrl: { type: string }
+        lastAccessedAt: { type: string, format: date-time }
+    LibraryChannel:
+      type: object
+      required: [channel, videos, totalBytes]
+      properties:
+        channel: { $ref: '#/components/schemas/Channel' }
+        videos:
+          type: array
+          items: { $ref: '#/components/schemas/LibraryItem' }
+        totalBytes: { type: integer, format: int64 }
+    LibraryResponse:
+      type: object
+      required: [channels, usedBytes, quotaBytes, lruThresholdPercent]
+      properties:
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/LibraryChannel' }
+        usedBytes: { type: integer, format: int64 }
+        quotaBytes: { type: integer, format: int64 }
+        lruThresholdPercent: { type: integer, enum: [90] }
+    ArchiveJob:
+      type: object
+      required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [video, playlist, channel] }
+        targetId: { type: string }
+        ownerUsername: { type: string }
+        ownerRole: { type: string, enum: [VIEWER, ADMIN] }
+        priority: { type: integer }
+        status: { type: string, enum: [queued, running, completed, failed, cancelled] }
+        totalCount: { type: integer }
+        completedCount: { type: integer }
+        failedCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        nextAttemptAt: { type: [string, 'null'], format: date-time }
+        error: { type: [string, 'null'] }
+    UserQuota:
+      type: object
+      required: [username, role, quotaBytes, usedBytes, effectiveQuotaBytes, lruThresholdPercent]
+      properties:
+        username: { type: string }
+        role: { type: string, enum: [VIEWER, ADMIN] }
+        quotaBytes: { type: [integer, 'null'], format: int64, description: Personal override or null }
+        usedBytes: { type: integer, format: int64 }
+        effectiveQuotaBytes: { type: integer, format: int64 }
+        lruThresholdPercent: { type: integer, enum: [90] }
+    QuotaUpdate:
+      type: object
+      properties:
+        quotaBytes: { type: [integer, 'null'], format: int64, minimum: 1, description: Null removes the personal override }
+    StorageResponse:
+      type: object
+      required: [nfsTotalBytes, nfsFreeBytes, users]
+      properties:
+        nfsTotalBytes: { type: integer, format: int64 }
+        nfsFreeBytes: { type: integer, format: int64 }
+        users:
+          type: array
+          items: { $ref: '#/components/schemas/UserQuota' }
+    ApiError:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        actions:
+          type: array
+          items: { type: string }
+security:
+  - bearerAuth: []
