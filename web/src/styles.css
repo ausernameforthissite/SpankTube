@@ -61,8 +61,8 @@ select { padding: 10px; color: #eef0f4; background: #0f1218; border: 1px solid #
 .split-button { display: inline-flex; overflow: hidden; border-radius: 8px; }
 .split-button button { border-radius: 0; }
 .split-button .split-arrow { padding: 10px 11px; border-left: 1px solid #515b6e; font-size: 0.72rem; }
-.queue-pulse { animation: queue-glow 0.85s ease-in-out infinite alternate; }
-.toast { position: fixed; z-index: 1100; inset: 18px auto auto 50%; margin: 0; transform: translateX(-50%); max-width: min(520px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #586c9b; border-radius: 10px; color: #edf2ff; background: #263452; box-shadow: 0 8px 32px #0008; }
+.queue-pulse { animation: queue-glow 0.425s ease-in-out infinite alternate; }
+.toast { position: fixed; z-index: 1100; top: 40px; left: 50%; margin: 0; transform: translateX(-50%); max-width: min(520px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #586c9b; border-radius: 10px; color: #edf2ff; background: #263452; box-shadow: 0 8px 32px #0008; }
 .popup-backdrop { position: fixed; z-index: 1000; inset: 0; background: transparent; }
 .popup-window { position: fixed; z-index: 1001; top: 74px; right: max(16px, calc((100vw - 1100px) / 2)); width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 96px); overflow: auto; padding: 18px; border: 1px solid #3a4558; border-radius: 12px; background: #171c26; box-shadow: 0 18px 70px #000b; }
 .popup-window:empty { display: none; }
@@ -97,8 +97,8 @@ input[role="switch"]:checked::before { transform: translateX(18px); }
 .filename { margin-top: 5px; color: #7f8b9e; font-size: 0.75rem; overflow-wrap: anywhere; }
 .error-inline { max-width: none; margin-top: 7px; }
 @keyframes queue-glow {
-  from { background: #504b2e; box-shadow: 0 0 0 0 #8b7a3530; }
-  to { background: #6b6033; box-shadow: 0 0 14px 2px #8b7a3560; }
+  from { background: #303745; color: #d8deea; box-shadow: 0 0 0 0 #ffcc0000; }
+  to { background: #ffd52e; color: #1a1600; box-shadow: 0 0 14px 3px #ffcc0059; }
 }
 @keyframes progress-slide {
   from { background-position: 0 0; }

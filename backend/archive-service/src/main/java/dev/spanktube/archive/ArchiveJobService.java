@@ -45,6 +45,16 @@ class ArchiveJobService {
             if (existing != null) {
                 return new ArchiveModels.EnqueueResult(repository.job(existing), false);
             }
+            ArchiveModels.ExistingVideo archived = catalogClient.existing(request.owner(), request.targetId())
+                    .orElse(null);
+            if (archived != null) {
+                ArchiveModels.Job completed = repository.completedVideoJob(request.targetId(), request.owner());
+                if (completed == null) {
+                    String jobId = repository.createCompletedArchive(request, archived);
+                    completed = repository.job(jobId);
+                }
+                return new ArchiveModels.EnqueueResult(completed, false);
+            }
         }
         if (request.kind() == ArchiveModels.Kind.DOWNLOAD) {
             ArchiveModels.Job active = repository.activeDownloadJob(request.targetId(), request.owner(),

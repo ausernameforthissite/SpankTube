@@ -163,7 +163,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<string[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
-  const toastRef = useRef<HTMLDivElement>(null);
   const queueButtonRef = useRef<HTMLDivElement>(null);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -238,24 +237,35 @@ export default function App() {
   }, [ensureAccessToken]);
 
   const notify = useCallback((message: string) => {
-    const toast = toastRef.current;
-    if (toast) {
-      toast.textContent = message;
-      toast.hidden = false;
-      toast.showPopover();
-    }
-    const queue = queueButtonRef.current;
-    if (queue) queue.classList.add("queue-pulse");
-    if (pulseTimer.current) clearTimeout(pulseTimer.current);
-    pulseTimer.current = setTimeout(() => queue?.classList.remove("queue-pulse"), 5000);
+    document.getElementById("spanktube-toast")?.remove();
+    const element = document.createElement("div");
+    element.id = "spanktube-toast";
+    element.className = "toast";
+    element.style.cssText = "position:fixed;top:40px;left:50%;transform:translateX(-50%);z-index:1100;max-width:min(520px,calc(100vw - 32px));padding:13px 18px;border:1px solid #586c9b;border-radius:10px;color:#edf2ff;background:#263452;box-shadow:0 8px 32px #0008;margin:0;display:block;visibility:visible;opacity:1;";
+    element.setAttribute("role", "status");
+    element.textContent = message;
+    document.body.appendChild(element);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => toast?.hidePopover(), 5000);
+    toastTimer.current = setTimeout(() => element.remove(), 5000);
+    const queue = queueButtonRef.current;
+    if (queue) {
+      queue.style.animation = "queue-glow 0.425s ease-in-out infinite alternate";
+      queue.querySelectorAll("button").forEach(button => {
+        button.style.animation = "queue-glow 0.425s ease-in-out infinite alternate";
+      });
+    }
+    if (pulseTimer.current) clearTimeout(pulseTimer.current);
+    pulseTimer.current = setTimeout(() => {
+      if (queue) {
+        queue.style.animation = "";
+        queue.querySelectorAll("button").forEach(button => {
+          button.style.animation = "";
+        });
+      }
+    }, 5000);
   }, []);
 
-  const onQueueJob = useCallback((job: QueueJob) => {
-    notify(job.purpose === "DOWNLOAD" ? "Задание на скачивание создано" : "Архивация поставлена в очередь");
-  }, [notify]);
-  const { jobs, beforeYou } = useQueue(Boolean(session), apiFetch, onQueueJob);
+  const { jobs, beforeYou } = useQueue(Boolean(session), apiFetch);
 
   const navigate = useCallback((url: string) => {
     window.history.pushState({}, "", url);
@@ -489,10 +499,11 @@ export default function App() {
   const archive = async () => {
     if (!video) return;
     setError(null);
-    notify("Архивация ставится в очередь");
     try {
       const response = await apiFetch(`/api/v1/videos/${video.videoId}/save`, { method: "POST" });
-      if (response.status === 202) notify("Архивация поставлена в очередь");
+      const job = await response.json() as QueueJob;
+      if (job.status === "completed") notify("Видео уже заархивировано");
+      else if (response.status === 202) notify("Архивация поставлена в очередь");
       else notify("Архивация этого видео уже идёт");
     } catch (reason) {
       showError(reason);
@@ -615,7 +626,6 @@ export default function App() {
         {session.role === "ADMIN" && <button className="secondary" onClick={() => navigate("/admin")}>Квоты</button>}
       </nav>
 
-      <div className="toast" role="status" popover="manual" ref={toastRef} />
       {location.path === "/" && (
         <section className="panel">
           <form className="video-search" onSubmit={watchVideo}>

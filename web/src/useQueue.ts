@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiFetch, QueueJob, QueueSnapshot } from "./types";
 
-export function useQueue(enabled: boolean, apiFetch: ApiFetch, onJob: (job: QueueJob) => void): QueueSnapshot {
+export function useQueue(enabled: boolean, apiFetch: ApiFetch, onJob?: (job: QueueJob) => void): QueueSnapshot {
   const [snapshot, setSnapshot] = useState<QueueSnapshot>({ jobs: [], beforeYou: 0 });
   const listener = useRef(onJob);
   listener.current = onJob;
@@ -39,7 +39,7 @@ export function useQueue(enabled: boolean, apiFetch: ApiFetch, onJob: (job: Queu
             const next = JSON.parse(text) as QueueSnapshot;
             if (initialized) {
               for (const job of next.jobs) {
-                if (!seen.has(job.id)) listener.current(job);
+                if (!seen.has(job.id)) listener.current?.(job);
               }
             }
             seen.clear();

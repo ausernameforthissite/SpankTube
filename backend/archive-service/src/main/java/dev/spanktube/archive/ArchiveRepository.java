@@ -40,6 +40,25 @@ class ArchiveRepository {
                 rs -> rs.next() ? rs.getString(1) : null, videoId, owner);
     }
 
+    ArchiveModels.Job completedVideoJob(String videoId, String owner) {
+        return jdbc.query("select * from archive_jobs where kind = 'VIDEO' and target_id = ? and owner_id = ? "
+                        + "and status = 'completed' order by finished_at desc limit 1",
+                rs -> rs.next() ? mapJob(rs) : null, videoId, owner);
+    }
+
+    String createCompletedArchive(ArchiveModels.EnqueueRequest request, ArchiveModels.ExistingVideo archived) {
+        String jobId = createJob(request);
+        jdbc.update("update archive_job_items set status = 'completed', error = null where job_id = ?",
+                UUID.fromString(jobId));
+        jdbc.update("update archive_jobs set status = 'completed', stage = 'COMPLETED', completed_count = 1, "
+                        + "finished_at = now(), download_url = '/api/v1/library/' || target_id || '/file', "
+                        + "file_path = ?, temporary_file = false, bytes_downloaded = ?, total_bytes = ?, speed_bps = 0, "
+                        + "title = ?, width = ?, height = ?, video_codec = ?, audio_codec = ? where id = ?",
+                archived.archivedPath(), archived.sizeBytes(), archived.sizeBytes(), archived.title(),
+                archived.width(), archived.height(), archived.videoCodec(), archived.audioCodec(), UUID.fromString(jobId));
+        return jobId;
+    }
+
     ArchiveModels.Job activeDownloadJob(String videoId, String owner, String signature) {
         return jdbc.query("select * from archive_jobs where kind = 'DOWNLOAD' and target_id = ? and owner_id = ? "
                         + "and options_key = ? and status in ('queued', 'running') order by created_at desc limit 1",
