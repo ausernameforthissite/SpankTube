@@ -17,7 +17,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: media-service
-          image: registry.local/spanktube/media-service:0.1.0
+          image: registry.local/spanktube/media-service:0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082
@@ -29,6 +29,16 @@ spec:
           env:
             - name: UPSTREAM_SERVICE_URL
               value: http://youtube-upstream-service:8081
+            - name: CATALOG_SERVICE_URL
+              value: http://catalog-service:8084
+            - name: ARCHIVE_ROOT
+              value: /archive
+          volumeMounts:
+            - name: archive
+              mountPath: /archive
+              readOnly: true
+            - name: playback-cache
+              mountPath: /tmp/spanktube-playback
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -51,6 +61,14 @@ spec:
               memory: 384Mi
             limits:
               memory: 1Gi
+      volumes:
+        - name: archive
+          persistentVolumeClaim:
+            claimName: archive
+            readOnly: true
+        - name: playback-cache
+          emptyDir:
+            sizeLimit: 5Gi
 ---
 apiVersion: v1
 kind: Service

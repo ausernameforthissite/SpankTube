@@ -19,6 +19,19 @@ final class MediaUrlValidator {
         return allowedUrl(value, true);
     }
 
+    static URI thumbnailUrl(String value) {
+        URI uri = URI.create(value);
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        boolean allowed = host.equals("ytimg.com") || host.endsWith(".ytimg.com")
+                || host.equals("ggpht.com") || host.endsWith(".ggpht.com")
+                || host.equals("googleusercontent.com") || host.endsWith(".googleusercontent.com")
+                || host.equals("youtube.com") || host.endsWith(".youtube.com");
+        if (!"https".equals(uri.getScheme()) || !allowed) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Upstream returned a disallowed thumbnail URL");
+        }
+        return uri;
+    }
+
     private static URI allowedUrl(String value, boolean allowYoutube) {
         URI uri = URI.create(value);
         String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);

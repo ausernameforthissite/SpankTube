@@ -43,7 +43,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["getVideo"];
+        get: operations["getStage2Video"];
         put?: never;
         post?: never;
         delete?: never;
@@ -52,14 +52,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/media/v/{videoId}/manifest.mpd": {
+    "/api/v1/search": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["getManifest"];
+        get: operations["searchStage2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -68,14 +68,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/media/v/{videoId}/seg/{formatId}": {
+    "/api/v1/channels/{channelId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["getSegment"];
+        get: operations["getStage2Channel"];
         put?: never;
         post?: never;
         delete?: never;
@@ -84,14 +84,270 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/media/v/{videoId}/sub/{trackId}": {
+    "/api/v1/channels/{channelId}/videos": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["getSubtitle"];
+        get: operations["getStage2ChannelVideos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/channels/{channelId}/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ChannelPlaylists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playlists/{playlistId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Playlist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Library"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/{videoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteStage2LibraryItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/{videoId}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["downloadStage2LibraryFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reportStage2WatchProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["saveStage2Video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playlists/{playlistId}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["saveStage2Playlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/channels/{channelId}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["saveStage2Channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ArchiveJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ArchiveJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2AdminLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/library/{videoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteStage2AdminLibraryItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{username}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2UserQuota"];
+        put: operations["setStage2UserQuota"];
+        post?: never;
+        delete: operations["resetStage2UserQuota"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Storage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -124,32 +380,58 @@ export interface components {
             /** @enum {string} */
             role: "VIEWER" | "ADMIN";
         };
+        WatchProgressRequest: {
+            /** Format: int64 */
+            positionSeconds: number;
+            /** Format: int64 */
+            durationSeconds: number;
+        };
+        Channel: {
+            channelId: string;
+            title: string;
+            handle?: string | null;
+            customPath?: string | null;
+            /** @description SpankTube route mirroring YouTube */
+            url: string;
+            /** @description media-service URL */
+            avatarUrl: string;
+            /** Format: int64 */
+            subscriberCount?: number | null;
+            videos?: components["schemas"]["SearchItem"][];
+            playlists?: components["schemas"]["SearchItem"][];
+            nextCursor?: string | null;
+        };
         Video: {
             videoId: string;
-            title?: string | null;
+            title: string;
             description?: string | null;
-            channelId?: string | null;
-            channelName?: string | null;
+            publishedAt: string;
             /** Format: int64 */
             durationSeconds?: number | null;
             /** Format: int64 */
             viewCount?: number | null;
             /** Format: int64 */
             likeCount?: number | null;
-            publishedAt?: string | null;
+            channelId: string;
+            channelName: string;
+            /** @description media-service URL */
+            channelAvatarUrl: string | null;
+            /** @description SpankTube channel route */
+            channelUrl: string;
+            /** @description media-service URL */
+            thumbnailUrl: string | null;
             manifestUrl: string;
             formats: components["schemas"]["Format"][];
             subtitles: components["schemas"]["Subtitle"][];
+            sponsorBlock: components["schemas"]["SponsorSegment"][];
+            /** Format: int64 */
+            dislikeCountEstimate?: number | null;
         };
         Format: {
             formatId: string;
             mimeType?: string | null;
             codecs?: string | null;
-            width?: number | null;
             height?: number | null;
-            fps?: number | null;
-            /** Format: int64 */
-            bitrate?: number | null;
             hasVideo: boolean;
             hasAudio: boolean;
             segmentUrl: string;
@@ -158,7 +440,142 @@ export interface components {
             trackId: string;
             language: string;
             label: string;
+            /** @description media-service URL */
             url: string;
+        };
+        SponsorSegment: {
+            startSeconds: number;
+            endSeconds: number;
+            category: string;
+        };
+        SearchItem: {
+            /** @enum {string} */
+            kind: "video" | "channel" | "playlist";
+            id: string;
+            title: string;
+            /** @description SpankTube route mirroring YouTube */
+            url: string;
+            /** @description media-service URL */
+            thumbnailUrl: string;
+            channelName?: string | null;
+            /** Format: int64 */
+            durationSeconds?: number | null;
+            videoCount?: number | null;
+        };
+        SearchResults: {
+            items: components["schemas"]["SearchItem"][];
+            nextCursor?: string | null;
+        };
+        Playlist: {
+            playlistId: string;
+            title: string;
+            channel?: components["schemas"]["Channel"];
+            items: components["schemas"]["SearchItem"][];
+            nextCursor?: string | null;
+        };
+        LibraryItem: {
+            videoId: string;
+            title: string;
+            /** Format: int64 */
+            durationSeconds: number;
+            /** Format: int64 */
+            sizeBytes: number;
+            sizeMB: number;
+            downloadUrl: string;
+            /** Format: date-time */
+            lastAccessedAt: string;
+        };
+        LibraryChannel: {
+            channel: components["schemas"]["Channel"];
+            videos: components["schemas"]["LibraryItem"][];
+            /** Format: int64 */
+            totalBytes: number;
+        };
+        LibraryResponse: {
+            channels: components["schemas"]["LibraryChannel"][];
+            /** Format: int64 */
+            usedBytes: number;
+            /** Format: int64 */
+            quotaBytes: number;
+            /** @enum {integer} */
+            lruThresholdPercent: 90;
+        };
+        ArchiveJob: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "VIDEO" | "PLAYLIST" | "CHANNEL";
+            targetId: string;
+            ownerUsername: string;
+            /** @enum {string} */
+            ownerRole: "VIEWER" | "ADMIN";
+            priority: number;
+            /** @enum {string} */
+            status: "queued" | "running" | "completed" | "failed" | "cancelled";
+            totalCount: number;
+            completedCount: number;
+            failedCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** Format: date-time */
+            nextAttemptAt?: string | null;
+            error?: string | null;
+        };
+        EffectiveQuota: {
+            username: string;
+            /** @enum {string} */
+            role: "VIEWER" | "ADMIN";
+            /** Format: int64 */
+            quotaBytes: number | null;
+            /** Format: int64 */
+            effectiveQuotaBytes: number;
+            /** @enum {integer} */
+            lruThresholdPercent: 90;
+        };
+        UserQuota: {
+            username: string;
+            /** @enum {string} */
+            role: "VIEWER" | "ADMIN";
+            /**
+             * Format: int64
+             * @description Personal override or null
+             */
+            quotaBytes: number | null;
+            /** Format: int64 */
+            usedBytes: number;
+            /** Format: int64 */
+            effectiveQuotaBytes: number;
+            /** @enum {integer} */
+            lruThresholdPercent: 90;
+        };
+        QuotaUpdate: {
+            /**
+             * Format: int64
+             * @description Null removes the personal override
+             */
+            quotaBytes?: number | null;
+        };
+        StorageUser: {
+            username: string;
+            /** @enum {string} */
+            role: "VIEWER" | "ADMIN";
+            /** Format: int64 */
+            usedBytes: number;
+            /** Format: int64 */
+            effectiveQuotaBytes: number;
+            /** @enum {integer} */
+            lruThresholdPercent: 90;
+        };
+        StorageResponse: {
+            /** Format: int64 */
+            nfsTotalBytes: number;
+            /** Format: int64 */
+            nfsFreeBytes: number;
+            users: components["schemas"]["StorageUser"][];
         };
         ApiError: {
             code?: string;
@@ -179,6 +596,9 @@ export interface components {
     };
     parameters: {
         VideoId: string;
+        ChannelId: string;
+        PlaylistId: string;
+        Username: string;
     };
     requestBodies: never;
     headers: never;
@@ -199,7 +619,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authenticated */
+            /** @description Access and rotating refresh tokens */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -208,7 +628,6 @@ export interface operations {
                     "application/json": components["schemas"]["TokenPair"];
                 };
             };
-            401: components["responses"]["Error"];
         };
     };
     refresh: {
@@ -224,7 +643,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Tokens rotated */
+            /** @description Rotated token pair */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -233,10 +652,9 @@ export interface operations {
                     "application/json": components["schemas"]["TokenPair"];
                 };
             };
-            401: components["responses"]["Error"];
         };
     };
-    getVideo: {
+    getStage2Video: {
         parameters: {
             query?: never;
             header?: never;
@@ -247,7 +665,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Video metadata without upstream media URLs */
+            /** @description Video with publication date and channel metadata */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -256,12 +674,153 @@ export interface operations {
                     "application/json": components["schemas"]["Video"];
                 };
             };
-            400: components["responses"]["Error"];
-            502: components["responses"]["Error"];
-            503: components["responses"]["Error"];
         };
     };
-    getManifest: {
+    searchStage2: {
+        parameters: {
+            query: {
+                q: string;
+                type: "videos" | "channels" | "playlists";
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description YouTube search results with proxied previews */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+        };
+    };
+    getStage2Channel: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channel metadata and avatar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Channel"];
+                };
+            };
+        };
+    };
+    getStage2ChannelVideos: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channel videos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+        };
+    };
+    getStage2ChannelPlaylists: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channel playlists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+        };
+    };
+    getStage2Playlist: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Playlist with previews */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Playlist"];
+                };
+            };
+        };
+    };
+    getStage2Library: {
+        parameters: {
+            query?: {
+                channelId?: string;
+                sort?: "size" | "duration" | "title";
+                direction?: "asc" | "desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's library grouped by channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryResponse"];
+                };
+            };
+        };
+    };
+    deleteStage2LibraryItem: {
         parameters: {
             query?: never;
             header?: never;
@@ -272,72 +831,330 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description DASH manifest */
-            200: {
+            /** @description User link removed; physical file removed only with the last link */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/dash+xml": string;
-                };
+                content?: never;
             };
-            502: components["responses"]["Error"];
-            503: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
-    getSegment: {
-        parameters: {
-            query?: never;
-            header?: {
-                Range?: string;
-            };
-            path: {
-                videoId: components["parameters"]["VideoId"];
-                formatId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Complete media stream */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Media byte range */
-            206: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-        };
-    };
-    getSubtitle: {
+    downloadStage2LibraryFile: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 videoId: components["parameters"]["VideoId"];
-                trackId: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description WebVTT subtitle track */
+            /** @description MKV download on the user's device */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/vtt": string;
+                    "video/x-matroska": string;
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    reportStage2WatchProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description Progress accepted; archiving starts at 30 seconds or 5 percent */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    saveStage2Video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persistent archive job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+        };
+    };
+    saveStage2Playlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Batch archive job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+        };
+    };
+    saveStage2Channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Batch archive job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+        };
+    };
+    getStage2ArchiveJobs: {
+        parameters: {
+            query?: {
+                status?: "queued" | "running" | "completed" | "failed" | "cancelled";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archive jobs ordered by role priority and FIFO */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"][];
+                };
+            };
+        };
+    };
+    getStage2ArchiveJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archive job visible to its owner or an administrator */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getStage2AdminLibrary: {
+        parameters: {
+            query?: {
+                username?: string;
+                channelId?: string;
+                sort?: "size" | "duration" | "title";
+                direction?: "asc" | "desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All libraries, or one user's library with quotas */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryResponse"] | {
+                        channels?: components["schemas"]["LibraryChannel"][];
+                    };
+                };
+            };
+        };
+    };
+    deleteStage2AdminLibraryItem: {
+        parameters: {
+            query: {
+                username: string;
+            };
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User link removed; physical file removed only with the last link */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getStage2Users: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Users and effective quotas */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserQuota"][];
+                };
+            };
+        };
+    };
+    getStage2UserQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: components["parameters"]["Username"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effective user quota */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserQuota"];
+                };
+            };
+        };
+    };
+    setStage2UserQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: components["parameters"]["Username"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated personal quota */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveQuota"];
+                };
+            };
+        };
+    };
+    resetStage2UserQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: components["parameters"]["Username"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personal override removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveQuota"];
+                };
+            };
+        };
+    };
+    getStage2Storage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description NFS and per-user quota usage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageResponse"];
                 };
             };
         };

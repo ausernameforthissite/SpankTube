@@ -14,6 +14,12 @@ management:
 spanktube:
   media:
     upstream-url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}
+    catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8084}
+    playback-cache: ${PLAYBACK_CACHE:/tmp/spanktube-playback}
+    ffmpeg-executable: ${FFMPEG_EXECUTABLE:ffmpeg}
+    remux-timeout: ${REMUX_TIMEOUT:30m}
+  archive:
+    root: ${ARCHIVE_ROOT:/archive}
   egress:
     mode: ${EGRESS_MODE:socks5}
     host: ${EGRESS_HOST:}

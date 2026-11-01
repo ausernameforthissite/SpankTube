@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: user-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:users}
+    username: ${POSTGRES_USER:spanktube}
+    password: ${POSTGRES_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
 
 management:
   endpoints:
@@ -25,3 +33,9 @@ spanktube:
       admin:
         password-hash: ${ADMIN_PASSWORD_HASH:}
         role: ADMIN
+  quota:
+    admin-default-bytes: ${ADMIN_QUOTA_BYTES:53687091200}
+    viewer-default-bytes: ${VIEWER_QUOTA_BYTES:10737418240}
+    lru-threshold-percent: ${LRU_THRESHOLD_PERCENT:90}
+  catalog:
+    url: ${CATALOG_SERVICE_URL:http://localhost:8084}

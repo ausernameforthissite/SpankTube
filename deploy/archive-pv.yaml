@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spanktube-archive
+spec:
+  capacity:
+    storage: 17Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.88.239
+    path: /mnt/tank/data/spanktube
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive
+  namespace: spanktube
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: spanktube-archive
+  resources:
+    requests:
+      storage: 17Ti

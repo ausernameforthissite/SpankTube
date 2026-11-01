@@ -9,11 +9,25 @@ import org.springframework.context.annotation.Configuration;
 class GatewayRoutes {
 
     @Bean
-    RouteLocator stageOneRoutes(RouteLocatorBuilder routes, GatewayProperties properties) {
+    RouteLocator stageTwoRoutes(RouteLocatorBuilder routes, GatewayProperties properties) {
         return routes.routes()
-                .route("user-service", route -> route.path("/api/v1/auth/**")
+                .route("auth-service", route -> route.path("/api/v1/auth/**")
                         .uri(properties.userServiceUrl()))
-                .route("youtube-upstream-service", route -> route.path("/api/v1/videos/**")
+                .route("archive-video-save", route -> route.path("/api/v1/videos/*/save")
+                        .uri(properties.archiveServiceUrl()))
+                .route("archive-playlist-save", route -> route.path("/api/v1/playlists/*/save")
+                        .uri(properties.archiveServiceUrl()))
+                .route("archive-channel-save", route -> route.path("/api/v1/channels/*/save")
+                        .uri(properties.archiveServiceUrl()))
+                .route("archive-jobs", route -> route.path("/api/v1/archive/**")
+                        .uri(properties.archiveServiceUrl()))
+                .route("admin-users", route -> route.path("/api/v1/admin/users/**")
+                        .uri(properties.userServiceUrl()))
+                .route("library", route -> route.path("/api/v1/library/**", "/api/v1/admin/library/**", "/api/v1/admin/storage/**")
+                        .uri(properties.catalogServiceUrl()))
+                .route("catalog-videos", route -> route.path("/api/v1/videos/**")
+                        .uri(properties.catalogServiceUrl()))
+                .route("upstream-search", route -> route.path("/api/v1/search", "/api/v1/channels/**", "/api/v1/playlists/**")
                         .uri(properties.upstreamServiceUrl()))
                 .route("media-service", route -> route.path("/media/**")
                         .uri(properties.mediaServiceUrl()))

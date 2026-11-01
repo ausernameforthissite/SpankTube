@@ -3,6 +3,36 @@ info:
   title: SpankTube Stage 2 API
   version: 0.2.0
 paths:
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Access and rotating refresh tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+  /api/v1/auth/refresh:
+    post:
+      operationId: refresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: Rotated token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
   /api/v1/videos/{videoId}:
     get:
       operationId: getStage2Video
@@ -37,7 +67,11 @@ paths:
   /api/v1/channels/{channelId}:
     get:
       operationId: getStage2Channel
-      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Channel metadata and avatar
@@ -75,22 +109,17 @@ paths:
   /api/v1/playlists/{playlistId}:
     get:
       operationId: getStage2Playlist
-      parameters: [{ $ref: '#/components/parameters/PlaylistId' }]
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Playlist with previews
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Playlist' }
-  /api/v1/home:
-    get:
-      operationId: getStage2Home
-      responses:
-        '200':
-          description: User subscriptions and hybrid recommendations
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/HomeResponse' }
   /api/v1/library:
     get:
       operationId: getStage2Library
@@ -131,6 +160,18 @@ paths:
               schema: { type: string, format: binary }
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/videos/{videoId}/progress:
+    post:
+      operationId: reportStage2WatchProgress
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WatchProgressRequest' }
+      responses:
+        '202':
+          description: Progress accepted; archiving starts at 30 seconds or 5 percent
   /api/v1/videos/{videoId}/save:
     post:
       operationId: saveStage2Video
@@ -176,6 +217,65 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/archive/jobs/{jobId}:
+    get:
+      operationId: getStage2ArchiveJob
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Archive job visible to its owner or an administrator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/admin/library:
+    get:
+      operationId: getStage2AdminLibrary
+      parameters:
+        - name: username
+          in: query
+          schema: { type: string }
+        - name: channelId
+          in: query
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [size, duration, title] }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [asc, desc] }
+      responses:
+        '200':
+          description: All libraries, or one user's library with quotas
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LibraryResponse'
+                  - type: object
+                    properties:
+                      channels:
+                        type: array
+                        items: { $ref: '#/components/schemas/LibraryChannel' }
+  /api/v1/admin/library/{videoId}:
+    delete:
+      operationId: deleteStage2AdminLibraryItem
+      parameters:
+        - $ref: '#/components/parameters/VideoId'
+        - name: username
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: User link removed; physical file removed only with the last link
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/admin/users:
     get:
       operationId: getStage2Users
@@ -210,7 +310,16 @@ paths:
           description: Updated personal quota
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UserQuota' }
+              schema: { $ref: '#/components/schemas/EffectiveQuota' }
+    delete:
+      operationId: resetStage2UserQuota
+      parameters: [{ $ref: '#/components/parameters/Username' }]
+      responses:
+        '200':
+          description: Personal override removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveQuota' }
   /api/v1/admin/storage:
     get:
       operationId: getStage2Storage
@@ -254,6 +363,33 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ApiError' }
   schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    TokenPair:
+      type: object
+      required: [accessToken, tokenType, expiresIn, refreshToken, refreshExpiresIn, role]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, format: int64 }
+        refreshToken: { type: string }
+        refreshExpiresIn: { type: integer, format: int64 }
+        role: { type: string, enum: [VIEWER, ADMIN] }
+    WatchProgressRequest:
+      type: object
+      required: [positionSeconds, durationSeconds]
+      properties:
+        positionSeconds: { type: integer, format: int64, minimum: 0 }
+        durationSeconds: { type: integer, format: int64, minimum: 1 }
     Channel:
       type: object
       required: [channelId, title, url, avatarUrl]
@@ -265,20 +401,36 @@ components:
         url: { type: string, description: SpankTube route mirroring YouTube }
         avatarUrl: { type: string, description: media-service URL }
         subscriberCount: { type: [integer, 'null'], format: int64 }
+        videos:
+          type: array
+          items: { $ref: '#/components/schemas/SearchItem' }
+        playlists:
+          type: array
+          items: { $ref: '#/components/schemas/SearchItem' }
+        nextCursor: { type: [string, 'null'] }
     Video:
       type: object
-      required: [videoId, title, publishedAt, channel, manifestUrl, formats, sponsorBlock]
+      required: [videoId, title, publishedAt, channelId, channelName, channelAvatarUrl, channelUrl, thumbnailUrl, manifestUrl, formats, subtitles, sponsorBlock]
       properties:
         videoId: { type: string }
         title: { type: string }
         description: { type: [string, 'null'] }
         publishedAt: { type: string }
         durationSeconds: { type: [integer, 'null'], format: int64 }
-        channel: { $ref: '#/components/schemas/Channel' }
+        viewCount: { type: [integer, 'null'], format: int64 }
+        likeCount: { type: [integer, 'null'], format: int64 }
+        channelId: { type: string }
+        channelName: { type: string }
+        channelAvatarUrl: { type: [string, 'null'], description: media-service URL }
+        channelUrl: { type: string, description: SpankTube channel route }
+        thumbnailUrl: { type: [string, 'null'], description: media-service URL }
         manifestUrl: { type: string }
         formats:
           type: array
           items: { $ref: '#/components/schemas/Format' }
+        subtitles:
+          type: array
+          items: { $ref: '#/components/schemas/Subtitle' }
         sponsorBlock:
           type: array
           items: { $ref: '#/components/schemas/SponsorSegment' }
@@ -294,6 +446,14 @@ components:
         hasVideo: { type: boolean }
         hasAudio: { type: boolean }
         segmentUrl: { type: string }
+    Subtitle:
+      type: object
+      required: [trackId, language, label, url]
+      properties:
+        trackId: { type: string }
+        language: { type: string }
+        label: { type: string }
+        url: { type: string, description: media-service URL }
     SponsorSegment:
       type: object
       required: [startSeconds, endSeconds, category]
@@ -332,17 +492,6 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SearchItem' }
         nextCursor: { type: [string, 'null'] }
-    HomeResponse:
-      type: object
-      required: [subscriptions, recommendations, recommendationSource]
-      properties:
-        subscriptions:
-          type: array
-          items: { $ref: '#/components/schemas/Channel' }
-        recommendations:
-          type: array
-          items: { $ref: '#/components/schemas/SearchItem' }
-        recommendationSource: { type: string, enum: [youtube, local] }
     LibraryItem:
       type: object
       required: [videoId, title, durationSeconds, sizeBytes, sizeMB, downloadUrl, lastAccessedAt]
@@ -378,7 +527,7 @@ components:
       required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt]
       properties:
         id: { type: string, format: uuid }
-        kind: { type: string, enum: [video, playlist, channel] }
+        kind: { type: string, enum: [VIDEO, PLAYLIST, CHANNEL] }
         targetId: { type: string }
         ownerUsername: { type: string }
         ownerRole: { type: string, enum: [VIEWER, ADMIN] }
@@ -392,6 +541,15 @@ components:
         finishedAt: { type: [string, 'null'], format: date-time }
         nextAttemptAt: { type: [string, 'null'], format: date-time }
         error: { type: [string, 'null'] }
+    EffectiveQuota:
+      type: object
+      required: [username, role, quotaBytes, effectiveQuotaBytes, lruThresholdPercent]
+      properties:
+        username: { type: string }
+        role: { type: string, enum: [VIEWER, ADMIN] }
+        quotaBytes: { type: [integer, 'null'], format: int64 }
+        effectiveQuotaBytes: { type: integer, format: int64 }
+        lruThresholdPercent: { type: integer, enum: [90] }
     UserQuota:
       type: object
       required: [username, role, quotaBytes, usedBytes, effectiveQuotaBytes, lruThresholdPercent]
@@ -406,6 +564,15 @@ components:
       type: object
       properties:
         quotaBytes: { type: [integer, 'null'], format: int64, minimum: 1, description: Null removes the personal override }
+    StorageUser:
+      type: object
+      required: [username, role, usedBytes, effectiveQuotaBytes, lruThresholdPercent]
+      properties:
+        username: { type: string }
+        role: { type: string, enum: [VIEWER, ADMIN] }
+        usedBytes: { type: integer, format: int64 }
+        effectiveQuotaBytes: { type: integer, format: int64 }
+        lruThresholdPercent: { type: integer, enum: [90] }
     StorageResponse:
       type: object
       required: [nfsTotalBytes, nfsFreeBytes, users]
@@ -414,7 +581,7 @@ components:
         nfsFreeBytes: { type: integer, format: int64 }
         users:
           type: array
-          items: { $ref: '#/components/schemas/UserQuota' }
+          items: { $ref: '#/components/schemas/StorageUser' }
     ApiError:
       type: object
       properties:

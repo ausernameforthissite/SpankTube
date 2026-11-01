@@ -8,6 +8,10 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:catalog}
     username: ${POSTGRES_USER:spanktube}
     password: ${POSTGRES_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
 
 management:
   endpoints:
@@ -19,3 +23,9 @@ spanktube:
   events:
     enabled: ${EVENTS_ENABLED:true}
     exchange: spanktube.events
+  archive:
+    root: ${ARCHIVE_ROOT:/archive}
+  user:
+    url: ${USER_SERVICE_URL:http://localhost:8083}
+  upstream:
+    url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}

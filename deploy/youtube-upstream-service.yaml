@@ -17,7 +17,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: youtube-upstream-service
-          image: registry.local/spanktube/youtube-upstream-service:0.1.0
+          image: registry.local/spanktube/youtube-upstream-service:0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8081

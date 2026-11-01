@@ -62,6 +62,7 @@ public class RabbitEventBus implements EventPublisher, EventSubscriber, SmartLif
 
             SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
             container.setQueueNames(queue);
+            container.setAcknowledgeMode(org.springframework.amqp.core.AcknowledgeMode.MANUAL);
             container.setMessageListener((org.springframework.amqp.rabbit.listener.api.ChannelAwareMessageListener) (message, channel) -> {
                 long deliveryTag = message.getMessageProperties().getDeliveryTag();
                 try {
@@ -70,12 +71,21 @@ public class RabbitEventBus implements EventPublisher, EventSubscriber, SmartLif
                     handler.apply(event).block();
                     channel.basicAck(deliveryTag, false);
                 } catch (Exception error) {
+                    org.slf4j.LoggerFactory.getLogger(RabbitEventBus.class)
+                            .warn("Event {} handler failed: {}", eventType, error.toString());
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
                     channel.basicNack(deliveryTag, false, true);
                 }
             });
             containers.add(container);
             container.start();
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .retryWhen(reactor.util.retry.Retry.backoff(Long.MAX_VALUE, java.time.Duration.ofSeconds(5))
+                        .maxBackoff(java.time.Duration.ofSeconds(30)));
     }
 
     @Override

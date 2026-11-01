@@ -26,6 +26,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
+@org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 class SecurityConfiguration {
 
     @Bean
@@ -40,7 +41,7 @@ class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/actuator/health").permitAll()
+                        .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/actuator/health", "/internal/v1/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(authentication)))
                 .httpBasic(AbstractHttpConfigurer::disable)

@@ -9,7 +9,7 @@ spec:
     matchExpressions:
       - key: app
         operator: In
-        values: [youtube-upstream-service, media-service]
+        values: [youtube-upstream-service, media-service, archive-service]
   policyTypes: [Egress]
   egress:
     - to:
@@ -43,7 +43,7 @@ spec:
     matchExpressions:
       - key: app
         operator: In
-        values: [gateway, user-service, redis, web]
+        values: [gateway, user-service, redis, postgres, rabbitmq, web]
   policyTypes: [Egress]
   egress:
     - to:

@@ -30,6 +30,8 @@ class GatewaySecurityConfiguration {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/actuator/health").permitAll()
+                        .pathMatchers(org.springframework.http.HttpMethod.GET,
+                                "/media/v/*/thumbnail", "/media/channel/*/avatar", "/media/playlist/*/thumbnail").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();
@@ -44,7 +46,7 @@ class GatewaySecurityConfiguration {
     CorsWebFilter corsFilter(GatewayProperties properties) {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(properties.allowedOrigins());
-        configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Range", "If-Range"));
         configuration.setExposedHeaders(List.of("Content-Length", "Content-Range", "Accept-Ranges", "ETag"));
         configuration.setAllowCredentials(true);

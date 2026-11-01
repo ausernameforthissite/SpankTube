@@ -17,7 +17,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: web
-          image: registry.local/spanktube/web:0.1.0
+          image: registry.local/spanktube/web:0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

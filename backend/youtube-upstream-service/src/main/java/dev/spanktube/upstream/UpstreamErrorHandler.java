@@ -10,6 +10,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 class UpstreamErrorHandler {
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ApiError> badRequest(IllegalArgumentException error) {
+        return ResponseEntity.badRequest().body(new ApiError("INVALID_ARGUMENT", error.getMessage(), List.of()));
+    }
+
     @ExceptionHandler(UpstreamException.class)
     ResponseEntity<ApiError> upstream(UpstreamException error) {
         HttpStatus status = error.reason() == UpstreamException.Reason.EGRESS_UNAVAILABLE

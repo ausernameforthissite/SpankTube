@@ -1,6 +1,6 @@
 # AGENTS.md — SpankTube
 
-> Проектная память для Kimi Code. Полный контекст — в `docs/design.md` (дизайн-документ v0.3). Если этого файла нет в репозитории — попроси пользователя добавить его и НЕ выдумывай архитектуру самостоятельно.
+> Проектная память для Kimi Code. Полный контекст — в `docs/design.md` (дизайн-документ v0.5). Если этого файла нет в репозитории — попроси пользователя добавить его и НЕ выдумывай архитектуру самостоятельно.
 
 ## Что это
 
@@ -27,7 +27,8 @@ spanktube/
 │   ├── media-service/             # DASH-манифесты, проксирование googlevideo
 │   ├── archive-service/           # скачивание в MKV на NFS, каталог, ACL
 │   └── lib/
-│       └── egress-starter/        # общий модуль SOCKS5-egress (см. правило 1)
+│       ├── egress-starter/        # общий модуль SOCKS5-egress (см. правило 1)
+│       └── event-bus/             # интерфейс событий и RabbitMQ-адаптер
 ├── web/
 ├── android/
 ├── deploy/                        # манифесты K8s / helm
@@ -51,6 +52,8 @@ spanktube/
 
 Этап 1 завершён и проверен на реальном видео в Docker: метаданные, DASH через SOCKS5, Range-сегменты и play/pause в Shaka.
 
+Этап 2 реализован и развёрнут в Docker: NFS/MKV, библиотека, ACL, LRU, поиск, превью, очередь с ADMIN-приоритетом и архивный DASH проверены. Полный MKV с SponsorBlock-главами не подтверждён: YouTube отвечает `429 Too Many Requests` на автосубтитрах; ограничение не обходить.
+
 Скоуп финального этапа 2: дата публикации и аватар канала, YouTube-совместимые маршруты, поиск видео/каналов и страницы с превью; `catalog-service` (метаданные, SponsorBlock, RYD, история), `archive-service` (MKV на NFS, пакетные задачи, ACL), PostgreSQL, RabbitMQ через собственный интерфейс, кнопка «Скачать» и библиотека с сортировкой/скачиванием MKV/ручным удалением, квоты и LRU. Подписки и гибридные рекомендации — этап 3, комментарии и Android — НЕ входят в этап 2.
 
 Правила из этапа 1: redirect только на разрешённые YouTube/googlevideo-хосты через тот же egress; DASH для MP4 строится по настоящему `sidx`, искусственные byte-range сегменты запрещены; `play()` вызывается только после завершения `player.load()`.
@@ -66,5 +69,7 @@ spanktube/
 - Сборка: `./gradlew build`
 - Тесты модуля: `./gradlew :backend:<module>:test`
 - Web: `cd web && npm run dev`
+- Web build: `npm run build --prefix web`
+- OpenAPI client: `npx openapi-typescript docs/openapi/stage2.yaml -o web/src/api/schema.ts`
 - Docker Compose: `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build`
 - Offline-сборка при подготовленном BuildKit cache: `GRADLE_EXTRA_ARGS=--offline docker compose --env-file deploy/.env -f deploy/docker-compose.yml build`

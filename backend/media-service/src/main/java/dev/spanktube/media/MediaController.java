@@ -6,6 +6,7 @@ import java.util.List;
 import dev.spanktube.egress.EgressProbe;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -37,26 +38,36 @@ class MediaController {
     private final DashManifestGenerator manifestGenerator;
     private final WebClient youtubeClient;
     private final EgressProbe egressProbe;
+    private final ArchivePlaybackService archivePlayback;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
             DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
-            ObjectProvider<EgressProbe> egressProbe) {
+            ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
         this.youtubeClient = youtubeClient;
         this.egressProbe = egressProbe.getIfAvailable();
+        this.archivePlayback = archivePlayback;
     }
 
     @GetMapping("/media/v/{videoId}/manifest.mpd")
-    Mono<ResponseEntity<String>> manifest(@PathVariable String videoId) {
-        return upstreamClient.video(videoId)
-                .flatMap(mp4IndexService::enrich)
-                .map(manifestGenerator::generate)
-                .map(body -> ResponseEntity.ok()
-                        .contentType(DASH)
-                        .cacheControl(CacheControl.noCache())
-                        .body(body));
+    Mono<ResponseEntity<String>> manifest(@PathVariable String videoId, @RequestHeader HttpHeaders headers) {
+        return archivePlayback.manifest(videoId, headers.getFirst("X-SpankTube-User"))
+                .switchIfEmpty(Mono.defer(() -> upstreamClient.video(videoId)
+                        .flatMap(mp4IndexService::enrich)
+                        .map(manifestGenerator::generate)
+                        .map(body -> ResponseEntity.ok()
+                                .contentType(DASH)
+                                .cacheControl(CacheControl.noCache())
+                                .body(body))));
+    }
+
+    @GetMapping("/media/v/{videoId}/archive/{filename}")
+    Mono<ResponseEntity<FileSystemResource>> archivedSegment(@PathVariable String videoId,
+            @PathVariable String filename, @RequestHeader HttpHeaders headers) {
+        return archivePlayback.file(videoId, headers.getFirst("X-SpankTube-User"), filename)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Archive not found")));
     }
 
     @GetMapping("/media/v/{videoId}/seg/{formatId}")
@@ -83,6 +94,39 @@ class MediaController {
                                 VTT.toString()))
                         .orElseGet(() -> Mono.error(new ResponseStatusException(
                                 HttpStatus.NOT_FOUND, "Unknown subtitle " + trackId))));
+    }
+
+    @GetMapping("/media/v/{videoId}/thumbnail")
+    Mono<ResponseEntity<byte[]>> videoThumbnail(@PathVariable String videoId) {
+        return upstreamClient.thumbnail(videoId).flatMap(this::image);
+    }
+
+    @GetMapping("/media/channel/{channelId}/avatar")
+    Mono<ResponseEntity<byte[]>> channelAvatar(@PathVariable String channelId) {
+        return upstreamClient.avatar(channelId).flatMap(this::image);
+    }
+
+    @GetMapping("/media/playlist/{playlistId}/thumbnail")
+    Mono<ResponseEntity<byte[]>> playlistThumbnail(@PathVariable String playlistId) {
+        return upstreamClient.playlistThumbnail(playlistId).flatMap(this::image);
+    }
+
+    private Mono<ResponseEntity<byte[]>> image(String url) {
+        if (url == null || url.isBlank()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Thumbnail not found"));
+        }
+        if (egressProbe != null && !egressProbe.isAvailable()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "YouTube egress is unavailable: " + egressProbe.lastError()));
+        }
+        return youtubeClient.get()
+                .uri(MediaUrlValidator.thumbnailUrl(url))
+                .retrieve()
+                .toEntity(byte[].class)
+                .map(response -> ResponseEntity.status(response.getStatusCode())
+                        .contentType(response.getHeaders().getContentType())
+                        .cacheControl(CacheControl.maxAge(1, java.util.concurrent.TimeUnit.HOURS))
+                        .body(response.getBody()));
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> proxy(URI uri, HttpHeaders incoming, String fallbackType) {

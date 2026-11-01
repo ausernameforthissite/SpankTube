@@ -8,6 +8,10 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:archive}
     username: ${POSTGRES_USER:spanktube}
     password: ${POSTGRES_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
 
 management:
   endpoints:
@@ -21,3 +25,26 @@ spanktube:
     exchange: spanktube.events
   archive:
     root: ${ARCHIVE_ROOT:/archive}
+    min-delay-seconds: ${ARCHIVE_MIN_DELAY_SECONDS:2}
+    max-delay-seconds: ${ARCHIVE_MAX_DELAY_SECONDS:5}
+    download-timeout: ${ARCHIVE_DOWNLOAD_TIMEOUT:1h}
+    worker-delay-ms: ${ARCHIVE_WORKER_DELAY_MS:2000}
+    yt-dlp-executable: ${YT_DLP_EXECUTABLE:yt-dlp}
+    ffmpeg-executable: ${FFMPEG_EXECUTABLE:ffmpeg}
+  upstream:
+    url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}
+  catalog:
+    url: ${CATALOG_SERVICE_URL:http://localhost:8084}
+  user:
+    url: ${USER_SERVICE_URL:http://localhost:8083}
+  egress:
+    mode: ${EGRESS_MODE:socks5}
+    host: ${EGRESS_HOST:}
+    port: ${EGRESS_PORT:1080}
+    username: ${EGRESS_USERNAME:}
+    password: ${EGRESS_PASSWORD:}
+    remote-dns: ${EGRESS_REMOTE_DNS:true}
+    probe:
+      enabled: true
+      interval: 30s
+      timeout: 10s

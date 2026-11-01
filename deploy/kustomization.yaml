@@ -4,9 +4,14 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - redis.yaml
+  - postgres.yaml
+  - rabbitmq.yaml
+  - archive-pv.yaml
   - gateway.yaml
   - user-service.yaml
   - youtube-upstream-service.yaml
+  - catalog-service.yaml
+  - archive-service.yaml
   - media-service.yaml
   - web.yaml
   - ingress.yaml

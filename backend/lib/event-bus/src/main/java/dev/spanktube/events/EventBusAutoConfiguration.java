@@ -18,6 +18,12 @@ public class EventBusAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RabbitAdmin rabbitAdmin(org.springframework.amqp.rabbit.connection.ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RabbitEventBus rabbitEventBus(RabbitTemplate rabbitTemplate, RabbitAdmin rabbitAdmin,
             org.springframework.amqp.rabbit.connection.ConnectionFactory connectionFactory,
             ObjectMapper objectMapper, EventProperties properties) {

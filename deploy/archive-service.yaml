@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archive-service
+  namespace: spanktube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: archive-service
+  template:
+    metadata:
+      labels:
+        app: archive-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: archive-service
+          image: registry.local/spanktube/archive-service:0.2.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8085
+          envFrom:
+            - configMapRef:
+                name: spanktube-egress
+            - secretRef:
+                name: spanktube-egress
+          env:
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_DB
+              value: archive
+            - name: POSTGRES_USER
+              value: spanktube
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spanktube-postgres
+                  key: password
+            - name: SPRING_RABBITMQ_HOST
+              value: rabbitmq
+            - name: SPRING_RABBITMQ_USERNAME
+              value: spanktube
+            - name: SPRING_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spanktube-rabbitmq
+                  key: password
+            - name: UPSTREAM_SERVICE_URL
+              value: http://youtube-upstream-service:8081
+            - name: CATALOG_SERVICE_URL
+              value: http://catalog-service:8084
+            - name: USER_SERVICE_URL
+              value: http://user-service:8083
+            - name: ARCHIVE_ROOT
+              value: /archive
+          volumeMounts:
+            - name: archive
+              mountPath: /archive
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8085
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: archive
+          persistentVolumeClaim:
+            claimName: archive
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archive-service
+  namespace: spanktube
+spec:
+  selector:
+    app: archive-service
+  ports:
+    - port: 8085
+      targetPort: 8085

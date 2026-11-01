@@ -9,6 +9,15 @@ x-egress-environment: &egress-environment
 x-backend-build-args: &backend-build-args
   GRADLE_EXTRA_ARGS: ${GRADLE_EXTRA_ARGS:-}
 
+x-database-environment: &database-environment
+  POSTGRES_HOST: postgres
+  POSTGRES_USER: spanktube
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+  SPRING_RABBITMQ_HOST: rabbitmq
+  SPRING_RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:?set RABBITMQ_DEFAULT_USER}
+  SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASSWORD:?set RABBITMQ_DEFAULT_PASSWORD}
+  EVENTS_ENABLED: "true"
+
 services:
   redis:
     image: redis:7.4-alpine
@@ -20,6 +29,41 @@ services:
       timeout: 3s
       retries: 20
 
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spanktube
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spanktube"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4.0-alpine
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?set RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASSWORD:?set RABBITMQ_DEFAULT_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   user-service:
     build:
       context: ..
@@ -27,14 +71,25 @@ services:
       args:
         <<: *backend-build-args
         SERVICE: user-service
-    image: spanktube/user-service:0.1.0
+    image: spanktube/user-service:0.2.0
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       JAVA_TOOL_OPTIONS: -Xmx256m
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: users
+      POSTGRES_USER: spanktube
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      CATALOG_SERVICE_URL: http://catalog-service:8084
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?set JWT_PRIVATE_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY}
       VIEWER_PASSWORD_HASH: ${VIEWER_PASSWORD_HASH:?set VIEWER_PASSWORD_HASH}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?set ADMIN_PASSWORD_HASH}
+      ADMIN_QUOTA_BYTES: ${ADMIN_QUOTA_BYTES:-53687091200}
+      VIEWER_QUOTA_BYTES: ${VIEWER_QUOTA_BYTES:-10737418240}
+      LRU_THRESHOLD_PERCENT: ${LRU_THRESHOLD_PERCENT:-90}
     ports:
       - "127.0.0.1:8083:8083"
 
@@ -43,7 +98,7 @@ services:
       context: ..
       dockerfile: backend/youtube-upstream-service/Dockerfile
       args: *backend-build-args
-    image: spanktube/youtube-upstream-service:0.1.0
+    image: spanktube/youtube-upstream-service:0.2.0
     restart: unless-stopped
     depends_on:
       redis:
@@ -58,20 +113,86 @@ services:
   media-service:
     build:
       context: ..
-      dockerfile: backend/Dockerfile
-      args:
-        <<: *backend-build-args
-        SERVICE: media-service
-    image: spanktube/media-service:0.1.0
+      dockerfile: backend/media-service/Dockerfile
+      args: *backend-build-args
+    image: spanktube/media-service:0.2.0
     restart: unless-stopped
     depends_on:
       - youtube-upstream-service
+      - catalog-service
     environment:
       <<: *egress-environment
       JAVA_TOOL_OPTIONS: -Xmx320m
       UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
+      CATALOG_SERVICE_URL: http://catalog-service:8084
+      ARCHIVE_ROOT: /archive
+    volumes:
+      - /mnt/spanktube:/archive:ro
     ports:
       - "127.0.0.1:8082:8082"
+
+  catalog-service:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        <<: *backend-build-args
+        SERVICE: catalog-service
+    image: spanktube/catalog-service:0.2.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      youtube-upstream-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    environment:
+      <<: [*database-environment]
+      JAVA_TOOL_OPTIONS: -Xmx320m
+      POSTGRES_DB: catalog
+      USER_SERVICE_URL: http://user-service:8083
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
+      ARCHIVE_ROOT: /archive
+    volumes:
+      - /mnt/spanktube:/archive
+    ports:
+      - "127.0.0.1:8084:8084"
+
+  archive-service:
+    build:
+      context: ..
+      dockerfile: backend/archive-service/Dockerfile
+      args: *backend-build-args
+    image: spanktube/archive-service:0.2.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+      youtube-upstream-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    environment:
+      <<: [*egress-environment, *database-environment]
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      POSTGRES_DB: archive
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
+      CATALOG_SERVICE_URL: http://catalog-service:8084
+      USER_SERVICE_URL: http://user-service:8083
+      ARCHIVE_ROOT: /archive
+      ARCHIVE_MIN_DELAY_SECONDS: ${ARCHIVE_MIN_DELAY_SECONDS:-2}
+      ARCHIVE_MAX_DELAY_SECONDS: ${ARCHIVE_MAX_DELAY_SECONDS:-5}
+    volumes:
+      - /mnt/spanktube:/archive
+    ports:
+      - "127.0.0.1:8085:8085"
 
   gateway:
     build:
@@ -80,18 +201,22 @@ services:
       args:
         <<: *backend-build-args
         SERVICE: gateway
-    image: spanktube/gateway:0.1.0
+    image: spanktube/gateway:0.2.0
     restart: unless-stopped
     depends_on:
       - user-service
       - youtube-upstream-service
       - media-service
+      - catalog-service
+      - archive-service
     environment:
       JAVA_TOOL_OPTIONS: -Xmx256m
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY}
       USER_SERVICE_URL: http://user-service:8083
       UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
       MEDIA_SERVICE_URL: http://media-service:8082
+      CATALOG_SERVICE_URL: http://catalog-service:8084
+      ARCHIVE_SERVICE_URL: http://archive-service:8085
       CORS_ALLOWED_ORIGINS: ${WEB_ORIGIN:-http://192.168.88.172:8088}
     ports:
       - "8080:8080"
@@ -100,9 +225,13 @@ services:
     build:
       context: ..
       dockerfile: web/Dockerfile
-    image: spanktube/web:0.1.0
+    image: spanktube/web:0.2.0
     restart: unless-stopped
     depends_on:
       - gateway
     ports:
       - "8088:8080"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:

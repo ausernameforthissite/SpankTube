@@ -8,6 +8,9 @@ public record PublicVideo(
         String description,
         String channelId,
         String channelName,
+        String channelAvatarUrl,
+        String channelUrl,
+        String thumbnailUrl,
         Long durationSeconds,
         Long viewCount,
         Long likeCount,
@@ -28,10 +31,14 @@ public record PublicVideo(
                 .map(track -> new Subtitle(track.trackId(), track.language(), track.label(),
                         prefix + "/sub/" + track.trackId()))
                 .toList();
+        String channelUrl = details.channelCustomPath() != null ? "/c/" + details.channelCustomPath()
+                : details.channelHandle() != null ? "/@" + details.channelHandle()
+                : "/channel/" + details.channelId();
         return new PublicVideo(details.videoId(), details.title(), details.description(),
-                details.channelId(), details.channelName(), details.durationSeconds(),
-                details.viewCount(), details.likeCount(), details.publishedAt(),
-                prefix + "/manifest.mpd", formats, subtitles);
+                details.channelId(), details.channelName(),
+                details.channelAvatarUrl() == null ? null : "/media/channel/" + details.channelId() + "/avatar",
+                channelUrl, prefix + "/thumbnail", details.durationSeconds(), details.viewCount(), details.likeCount(),
+                details.publishedAt(), prefix + "/manifest.mpd", formats, subtitles);
     }
 
     public record Format(String formatId, String mimeType, String codecs, Integer width, Integer height,
