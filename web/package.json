@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "generate:api": "openapi-typescript ../docs/openapi/stage1.yaml -o src/api/schema.ts"
+    "generate:api": "openapi-typescript ../docs/openapi/stage2.yaml -o src/api/schema.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

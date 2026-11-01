@@ -40,20 +40,33 @@ class ArchiveJobService {
         if (request.videoIds().isEmpty()) {
             throw new IllegalArgumentException("No videos to archive");
         }
-        if (request.kind() == ArchiveModels.Kind.VIDEO) {
+        if (request.kind() == ArchiveModels.Kind.PLAYLIST || request.kind() == ArchiveModels.Kind.CHANNEL) {
+            ArchiveModels.EnqueueResult first = null;
+            boolean created = false;
+            for (String videoId : request.videoIds().stream().distinct().toList()) {
+                ArchiveModels.EnqueueResult result = enqueue(new ArchiveModels.EnqueueRequest(
+                        request.owner(), request.role(), ArchiveModels.Kind.VIDEO, videoId, List.of(videoId)));
+                if (first == null) first = result;
+                created |= result.created();
+            }
+            return new ArchiveModels.EnqueueResult(first.job(), created);
+        }
+        if (request.kind() == ArchiveModels.Kind.VIDEO || request.kind() == ArchiveModels.Kind.REFRESH) {
             String existing = repository.activeVideoJob(request.videoIds().getFirst(), request.owner());
             if (existing != null) {
                 return new ArchiveModels.EnqueueResult(repository.job(existing), false);
             }
-            ArchiveModels.ExistingVideo archived = catalogClient.existing(request.owner(), request.targetId())
-                    .orElse(null);
-            if (archived != null) {
-                ArchiveModels.Job completed = repository.completedVideoJob(request.targetId(), request.owner());
-                if (completed == null) {
-                    String jobId = repository.createCompletedArchive(request, archived);
-                    completed = repository.job(jobId);
+            if (request.kind() == ArchiveModels.Kind.VIDEO) {
+                ArchiveModels.ExistingVideo archived = catalogClient.existing(request.owner(), request.targetId())
+                        .orElse(null);
+                if (archived != null) {
+                    ArchiveModels.Job completed = repository.completedVideoJob(request.targetId(), request.owner());
+                    if (completed == null) {
+                        String jobId = repository.createCompletedArchive(request, archived);
+                        completed = repository.job(jobId);
+                    }
+                    return new ArchiveModels.EnqueueResult(completed, false);
                 }
-                return new ArchiveModels.EnqueueResult(completed, false);
             }
         }
         if (request.kind() == ArchiveModels.Kind.DOWNLOAD) {
@@ -114,20 +127,23 @@ class ArchiveJobService {
     }
 
     void metadata(String jobId, String title, long estimatedBytes, Integer width, Integer height,
-            String videoCodec, String audioCodec) {
-        repository.updateMetadata(jobId, title, estimatedBytes, width, height, videoCodec, audioCodec);
+            String videoCodec, String audioCodec, Long audioBitrate) {
+        repository.updateMetadata(jobId, title, estimatedBytes, width, height, videoCodec, audioCodec, audioBitrate);
         events.publishQueueUpdate();
     }
 
     void progress(String jobId, DownloadProgress.Snapshot progress) {
         long now = System.nanoTime();
         long previous = lastProgress.get();
-        if (progress.stage() == ArchiveModels.Stage.DOWNLOADING && now - previous < 250_000_000) {
+        boolean downloading = progress.stage() == ArchiveModels.Stage.DOWNLOADING
+                || progress.stage() == ArchiveModels.Stage.DOWNLOADING_VIDEO
+                || progress.stage() == ArchiveModels.Stage.DOWNLOADING_AUDIO;
+        if (downloading && now - previous < 250_000_000) {
             return;
         }
         if (lastProgress.compareAndSet(previous, now)) {
             repository.updateProgress(jobId, progress.stage(), progress.downloadedBytes(),
-                    progress.totalBytes(), progress.speedBps());
+                    progress.totalBytes(), progress.speedBps(), progress.completedCount());
             events.publishQueueUpdate();
         }
     }
@@ -175,8 +191,18 @@ class ArchiveJobService {
         return repository.file(jobId);
     }
 
+    void dismiss(String jobId, String username) {
+        repository.dismiss(jobId, username);
+        events.publishQueueUpdate();
+    }
+
     long waitingAhead(String username) {
         return repository.waitingAhead(username);
+    }
+
+    @Scheduled(fixedDelay = 60_000)
+    void hideExpiredFailures() {
+        events.publishQueueUpdate();
     }
 
     @Scheduled(cron = "${spanktube.archive.cleanup-cron:0 */15 * * * *}")

@@ -17,6 +17,8 @@ class GatewayRoutes {
                         .uri(properties.archiveServiceUrl()))
                 .route("archive-video-save", route -> route.path("/api/v1/videos/*/save")
                         .uri(properties.archiveServiceUrl()))
+                .route("archive-video-refresh", route -> route.path("/api/v1/videos/*/refresh")
+                        .uri(properties.archiveServiceUrl()))
                 .route("archive-playlist-save", route -> route.path("/api/v1/playlists/*/save")
                         .uri(properties.archiveServiceUrl()))
                 .route("archive-channel-save", route -> route.path("/api/v1/channels/*/save")

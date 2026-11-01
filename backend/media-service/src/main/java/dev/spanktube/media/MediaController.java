@@ -41,11 +41,12 @@ class MediaController {
     private final EgressProbe egressProbe;
     private final ArchivePlaybackService archivePlayback;
     private final ThumbnailService thumbnailService;
+    private final PlaybackLogService playbackLogs;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
             DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
             ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
-            ThumbnailService thumbnailService) {
+            ThumbnailService thumbnailService, PlaybackLogService playbackLogs) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
@@ -53,24 +54,48 @@ class MediaController {
         this.egressProbe = egressProbe.getIfAvailable();
         this.archivePlayback = archivePlayback;
         this.thumbnailService = thumbnailService;
+        this.playbackLogs = playbackLogs;
+    }
+
+    @GetMapping(value = "/media/v/{videoId}/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    Flux<org.springframework.http.codec.ServerSentEvent<String>> logs(@PathVariable String videoId,
+            @RequestParam String session) {
+        return playbackLogs.stream(videoId, session);
     }
 
     @GetMapping("/media/v/{videoId}/manifest.mpd")
-    Mono<ResponseEntity<String>> manifest(@PathVariable String videoId, @RequestHeader HttpHeaders headers) {
-        return archivePlayback.manifest(videoId, headers.getFirst("X-SpankTube-User"))
-                .switchIfEmpty(Mono.defer(() -> upstreamClient.video(videoId)
-                        .flatMap(mp4IndexService::enrich)
-                        .map(manifestGenerator::generate)
-                        .map(body -> ResponseEntity.ok()
-                                .contentType(DASH)
-                                .cacheControl(CacheControl.noCache())
-                                .body(body))));
+    Mono<ResponseEntity<String>> manifest(@PathVariable String videoId, @RequestHeader HttpHeaders headers,
+            @RequestParam(required = false) String playbackSession, @RequestParam(required = false) String version) {
+        playbackLogs.log(videoId, playbackSession, "Проверка архивной копии SpankTube…");
+        return archivePlayback.manifest(videoId, headers.getFirst("X-SpankTube-User"), playbackSession, version)
+                .switchIfEmpty(Mono.defer(() -> {
+                    playbackLogs.log(videoId, playbackSession, "Архивная копия не найдена; запрос форматов YouTube…");
+                    return upstreamClient.video(videoId)
+                            .doOnNext(video -> playbackLogs.log(videoId, playbackSession,
+                                    "Получено форматов: " + video.formats().size()))
+                            .flatMap(video -> mp4IndexService.enrich(video, playbackSession))
+                            .map(manifestGenerator::generate)
+                            .map(body -> ResponseEntity.ok()
+                                    .contentType(DASH)
+                                    .cacheControl(CacheControl.noCache())
+                                    .body(body));
+                }))
+                .doOnNext(response -> playbackLogs.log(videoId, playbackSession, "DASH-манифест готов"))
+                .doOnError(error -> playbackLogs.error(videoId, playbackSession, error));
     }
 
     @GetMapping("/media/v/{videoId}/archive/{filename}")
     Mono<ResponseEntity<FileSystemResource>> archivedSegment(@PathVariable String videoId,
-            @PathVariable String filename, @RequestHeader HttpHeaders headers) {
-        return archivePlayback.file(videoId, headers.getFirst("X-SpankTube-User"), filename)
+            @PathVariable String filename, @RequestHeader HttpHeaders headers,
+            @RequestParam(required = false) String version) {
+        return archivePlayback.file(videoId, headers.getFirst("X-SpankTube-User"), filename, version)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Archive not found")));
+    }
+
+    @GetMapping("/media/v/{videoId}/archive/{versionId}/{filename}")
+    Mono<ResponseEntity<FileSystemResource>> archivedVersionSegment(@PathVariable String videoId,
+            @PathVariable String versionId, @PathVariable String filename, @RequestHeader HttpHeaders headers) {
+        return archivePlayback.file(videoId, headers.getFirst("X-SpankTube-User"), filename, versionId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Archive not found")));
     }
 

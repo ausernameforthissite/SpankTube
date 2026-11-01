@@ -66,9 +66,44 @@ class LibraryController {
     }
 
     @PostMapping("/internal/v1/library/prepare")
-    ResponseEntity<Void> prepare(@RequestBody LibraryModels.PrepareRequest request) {
-        libraryService.prepare(request.username(), request.requiredBytes(), request.videoId());
+    ResponseEntity<Void> prepare(@RequestBody LibraryModels.PrepareRequest request,
+            @RequestParam(defaultValue = "false") boolean additionalVersion) {
+        libraryService.prepare(request.username(), request.requiredBytes(), request.videoId(), additionalVersion);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/v1/videos/{videoId}/archive")
+    LibraryModels.ArchiveAvailability archiveAvailability(@PathVariable String videoId, HttpServletRequest request) {
+        return libraryService.archiveAvailability(identityService.required(request).username(), videoId);
+    }
+
+    @GetMapping("/internal/v1/library/versions/{versionId}")
+    ResponseEntity<ArchiveCompletedEvent> version(@PathVariable String versionId, @RequestParam String username,
+            @RequestParam String videoId) {
+        ArchiveCompletedEvent event = libraryService.version(username, videoId, versionId);
+        return event == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(event);
+    }
+
+    @GetMapping("/api/v1/videos/{videoId}/archive/versions")
+    List<LibraryModels.ArchiveVersion> archiveVersions(@PathVariable String videoId, HttpServletRequest request) {
+        return libraryService.archiveVersions(identityService.required(request).username(), videoId);
+    }
+
+    @GetMapping("/api/v1/videos/{videoId}/archive/versions/{versionId}/file")
+    ResponseEntity<InputStreamResource> versionFile(@PathVariable String videoId, @PathVariable String versionId,
+            HttpServletRequest request) throws Exception {
+        LibraryModels.FileDownload file = libraryService.fileVersion(identityService.required(request).username(),
+                videoId, versionId);
+        if (file == null || !Files.isRegularFile(file.path())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Archived version not found");
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("video/x-matroska"))
+                .contentLength(Files.size(file.path()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(file.filename(), java.nio.charset.StandardCharsets.UTF_8)
+                                .build().toString())
+                .body(new InputStreamResource(Files.newInputStream(file.path())));
     }
 
     @GetMapping("/api/v1/library/{videoId}/file")

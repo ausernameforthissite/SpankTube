@@ -8,3 +8,5 @@ create table if not exists user_settings (
     autoplay boolean not null default true,
     hide_technical_details boolean not null default false
 );
+
+alter table user_settings add column if not exists prefer_best_quality boolean not null default true;

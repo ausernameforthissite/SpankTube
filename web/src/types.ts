@@ -15,7 +15,7 @@ export type VideoFormat = {
 
 export type QueueJob = {
   id: string;
-  kind: "VIDEO" | "PLAYLIST" | "CHANNEL" | "DOWNLOAD";
+  kind: "VIDEO" | "PLAYLIST" | "CHANNEL" | "DOWNLOAD" | "REFRESH";
   targetId: string;
   ownerUsername: string;
   ownerRole: string;
@@ -40,8 +40,10 @@ export type QueueJob = {
   height: number | null;
   videoCodec: string | null;
   audioCodec: string | null;
+  audioBitrate: number | null;
   currentVideoId: string | null;
   fileName: string | null;
+  updatedAt: string;
   options: {
     videoFormatId: string | null;
     audioFormatId: string | null;
@@ -52,4 +54,42 @@ export type QueueJob = {
 
 export type QueueSnapshot = { jobs: QueueJob[]; beforeYou: number };
 
-export type UserSettings = { autoplay: boolean; hideTechnicalDetails: boolean };
+export type WatchProgress = {
+  videoId: string;
+  positionSeconds: number;
+  watchPercent: number;
+  lastAccessedAt: string;
+};
+
+export type WatchProgressMap = Record<string, WatchProgress>;
+
+export type UserSettings = { autoplay: boolean; hideTechnicalDetails: boolean; preferBestQuality: boolean };
+
+export type ArchiveVersion = {
+  versionId: string;
+  videoId: string;
+  title: string;
+  description: string | null;
+  publishedAt: string | null;
+  durationSeconds: number | null;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  audioBitrate: number | null;
+  channelId: string;
+  channelName: string;
+  channelUrl: string;
+  channelAvatarUrl: string;
+  downloadUrl: string;
+  filename: string;
+  current: boolean;
+};
+
+export type ArchiveAvailability = {
+  archived: boolean;
+  downloadUrl: string | null;
+  filename: string | null;
+  version: ArchiveVersion | null;
+};

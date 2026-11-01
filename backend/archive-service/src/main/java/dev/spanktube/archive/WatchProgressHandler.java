@@ -24,19 +24,20 @@ class WatchProgressHandler {
     @PostConstruct
     void subscribe() {
         subscriber.subscribe("archive.watch.progress", "watch.progress", WatchProgressEvent.class,
-                event -> {
-                    WatchProgressEvent progress = event.payload();
-                    if (progress.positionSeconds() < 30 && progress.watchPercent() < 5) {
-                        return Mono.empty();
-                    }
-                    if (catalogClient.hasLink(progress.username(), progress.videoId())) {
-                        return Mono.empty();
-                    }
-                    String role = userClient.role(progress.username());
-                    jobs.enqueue(new ArchiveModels.EnqueueRequest(progress.username(), role,
-                            ArchiveModels.Kind.VIDEO, progress.videoId(), java.util.List.of(progress.videoId())));
-                    return Mono.empty();
-                }).subscribe();
+                event -> archiveIfNeeded(event.payload())).subscribe();
+    }
+
+    Mono<Void> archiveIfNeeded(WatchProgressEvent progress) {
+        if (progress.positionSeconds() < 30 && progress.watchPercent() < 5) {
+            return Mono.empty();
+        }
+        if (catalogClient.existing(progress.username(), progress.videoId()).isPresent()) {
+            return Mono.empty();
+        }
+        String role = userClient.role(progress.username());
+        jobs.enqueue(new ArchiveModels.EnqueueRequest(progress.username(), role,
+                ArchiveModels.Kind.VIDEO, progress.videoId(), java.util.List.of(progress.videoId())));
+        return Mono.empty();
     }
 
     public record WatchProgressEvent(String username, String videoId,

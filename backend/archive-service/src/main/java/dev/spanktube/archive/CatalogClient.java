@@ -66,8 +66,12 @@ class CatalogClient {
     }
 
     void prepare(String username, long requiredBytes, String videoId) {
+        prepare(username, requiredBytes, videoId, false);
+    }
+
+    void prepare(String username, long requiredBytes, String videoId, boolean additionalVersion) {
         client.post()
-                .uri("/internal/v1/library/prepare")
+                .uri("/internal/v1/library/prepare?additionalVersion={additionalVersion}", additionalVersion)
                 .body(new PrepareRequest(username, requiredBytes, videoId))
                 .retrieve()
                 .toBodilessEntity();

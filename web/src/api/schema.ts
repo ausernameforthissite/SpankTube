@@ -132,6 +132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2WatchProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library": {
         parameters: {
             query?: never;
@@ -180,6 +196,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videos/{videoId}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ArchiveAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/archive/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ArchiveVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/archive/versions/{versionId}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["downloadStage2ArchiveVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{videoId}/progress": {
         parameters: {
             query?: never;
@@ -206,6 +270,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["downloadStage2Video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refreshStage2Video"];
         delete?: never;
         options?: never;
         head?: never;
@@ -292,6 +372,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/media/v/{videoId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamStage2PlaybackLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/archive/jobs/{jobId}/file": {
         parameters: {
             query?: never;
@@ -318,7 +414,7 @@ export interface paths {
         get: operations["getStage2ArchiveJob"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["dismissStage2ArchiveJob"];
         options?: never;
         head?: never;
         patch?: never;
@@ -558,6 +654,11 @@ export interface components {
             height?: number | null;
             videoCodec?: string | null;
             audioCodec?: string | null;
+            /**
+             * Format: int64
+             * @description Audio bitrate in bits per second
+             */
+            audioBitrate?: number | null;
             /** @description <YouTube title> [<videoId>] (<resolution>, <video codec>, <audio codec>).mkv */
             filename?: string;
         };
@@ -597,21 +698,67 @@ export interface components {
             /** @default true */
             sponsorBlock: boolean;
         };
+        ArchiveAvailability: {
+            archived: boolean;
+            downloadUrl?: string | null;
+            filename?: string | null;
+            version: components["schemas"]["ArchiveVersion"] | null;
+        };
+        ArchiveVersion: {
+            /** Format: uuid */
+            versionId: string;
+            videoId: string;
+            title: string;
+            description?: string | null;
+            publishedAt?: string | null;
+            /** Format: int64 */
+            durationSeconds: number | null;
+            /** Format: int64 */
+            sizeBytes: number;
+            width?: number | null;
+            height?: number | null;
+            videoCodec?: string | null;
+            audioCodec?: string | null;
+            /**
+             * Format: int64
+             * @description Audio bitrate in bits per second
+             */
+            audioBitrate?: number | null;
+            channelId: string;
+            channelName: string;
+            channelUrl: string;
+            /** @description media-service URL */
+            channelAvatarUrl: string;
+            downloadUrl: string;
+            filename: string;
+            current: boolean;
+        };
+        ProgressEntry: {
+            videoId: string;
+            /** Format: int64 */
+            positionSeconds: number;
+            watchPercent: number;
+            /** Format: date-time */
+            lastAccessedAt: string;
+        };
         UserSettings: {
             /** @default true */
             autoplay: boolean;
             /** @default false */
             hideTechnicalDetails: boolean;
+            /** @default true */
+            preferBestQuality: boolean;
         };
         SettingsPatch: {
             autoplay?: boolean;
             hideTechnicalDetails?: boolean;
+            preferBestQuality?: boolean;
         };
         ArchiveJob: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "VIDEO" | "PLAYLIST" | "CHANNEL" | "DOWNLOAD";
+            kind: "VIDEO" | "PLAYLIST" | "CHANNEL" | "DOWNLOAD" | "REFRESH";
             targetId: string;
             ownerUsername: string;
             /** @enum {string} */
@@ -619,11 +766,14 @@ export interface components {
             priority: number;
             /** @enum {string} */
             status: "queued" | "running" | "completed" | "failed";
+            /** @description Processing stages for a single video; legacy batches count videos */
             totalCount: number;
             completedCount: number;
             failedCount: number;
             /** Format: date-time */
             createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
             /** Format: date-time */
             startedAt?: string | null;
             /** Format: date-time */
@@ -634,7 +784,7 @@ export interface components {
             /** @enum {string} */
             purpose: "ARCHIVE" | "DOWNLOAD";
             /** @enum {string} */
-            stage: "QUEUED" | "WAITING" | "METADATA" | "DOWNLOADING" | "SUBTITLES" | "MUXING" | "CHAPTERS" | "FINISHING" | "COMPLETED" | "FAILED" | "EXPIRED";
+            stage: "QUEUED" | "WAITING" | "METADATA" | "DOWNLOADING" | "DOWNLOADING_VIDEO" | "DOWNLOADING_AUDIO" | "SUBTITLES" | "SPONSORBLOCK" | "MUXING" | "CHAPTERS" | "FINISHING" | "COMPLETED" | "FAILED" | "EXPIRED";
             /** Format: int64 */
             bytesDownloaded: number;
             /** Format: int64 */
@@ -647,6 +797,11 @@ export interface components {
             height?: number | null;
             videoCodec?: string | null;
             audioCodec?: string | null;
+            /**
+             * Format: int64
+             * @description Audio bitrate in bits per second
+             */
+            audioBitrate?: number | null;
             /** @description Item currently being downloaded or processed */
             currentVideoId?: string | null;
             fileName?: string | null;
@@ -923,6 +1078,26 @@ export interface operations {
             };
         };
     };
+    getStage2WatchProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's playback positions for resume and progress bars */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressEntry"][];
+                };
+            };
+        };
+    };
     getStage2Library: {
         parameters: {
             query?: {
@@ -980,6 +1155,74 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description MKV download on the user's device */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/x-matroska": string;
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getStage2ArchiveAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether any user's archived copy is available for direct download */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveAvailability"];
+                };
+            };
+        };
+    };
+    getStage2ArchiveVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All retained versions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveVersion"][];
+                };
+            };
+        };
+    };
+    downloadStage2ArchiveVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+                versionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Selected archived version */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1050,6 +1293,37 @@ export interface operations {
             };
         };
     };
+    refreshStage2Video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active refresh job reused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+            /** @description Download current YouTube copy as a new archive version */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+        };
+    };
     saveStage2Video: {
         parameters: {
             query?: never;
@@ -1061,6 +1335,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Active or already completed archive job reused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
             /** @description Persistent archive job */
             202: {
                 headers: {
@@ -1083,7 +1366,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Batch archive job */
+            /** @description First job; each playlist video has an independent queue entry */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1105,7 +1388,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Batch archive job */
+            /** @description First job; each channel video has an independent queue entry */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1119,7 +1402,7 @@ export interface operations {
     getStage2ArchiveJobs: {
         parameters: {
             query?: {
-                status?: "queued" | "running" | "completed" | "failed" | "cancelled";
+                status?: "queued" | "running" | "completed" | "failed";
             };
             header?: never;
             path?: never;
@@ -1127,7 +1410,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Archive jobs ordered by role priority and FIFO */
+            /** @description Visible jobs; failures expire after one hour and per-user dismissals are excluded */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1154,6 +1437,30 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": components["schemas"]["QueueSnapshot"];
+                };
+            };
+        };
+    };
+    streamStage2PlaybackLogs: {
+        parameters: {
+            query: {
+                session: string;
+            };
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Playback preparation log; playback-log events contain at most ten recent lines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
         };
@@ -1203,6 +1510,33 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    dismissStage2ArchiveJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Terminal job hidden only for the current user */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Active jobs cannot be dismissed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getStage2AdminLibrary: {

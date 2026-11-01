@@ -15,28 +15,35 @@ class Mp4IndexService {
 
     private static final int HEADER_BYTES = 64 * 1024;
     private final WebClient youtubeClient;
+    private final PlaybackLogService playbackLogs;
 
-    Mp4IndexService(@Qualifier("youtubeWebClient") WebClient youtubeClient) {
+    Mp4IndexService(@Qualifier("youtubeWebClient") WebClient youtubeClient, PlaybackLogService playbackLogs) {
         this.youtubeClient = youtubeClient;
+        this.playbackLogs = playbackLogs;
     }
 
-    Mono<UpstreamVideo> enrich(UpstreamVideo video) {
+    Mono<UpstreamVideo> enrich(UpstreamVideo video, String playbackSession) {
+        playbackLogs.log(video.videoId(), playbackSession, "Чтение MP4-индексов форматов…");
         return Flux.fromIterable(video.formats())
-                .flatMapSequential(this::enrichFormat, 4)
+                .flatMapSequential(format -> enrichFormat(video.videoId(), format, playbackSession), 4)
                 .collectList()
                 .map(formats -> new UpstreamVideo(video.videoId(), video.durationSeconds(), formats, video.subtitles()));
     }
 
-    private Mono<UpstreamVideo.Format> enrichFormat(UpstreamVideo.Format format) {
+    private Mono<UpstreamVideo.Format> enrichFormat(String videoId, UpstreamVideo.Format format,
+            String playbackSession) {
         if (format.indexRange() != null || format.mimeType() == null || !format.mimeType().endsWith("/mp4")) {
             return Mono.just(format);
         }
+        playbackLogs.log(videoId, playbackSession, "Чтение MP4-индекса: формат " + format.formatId());
         return youtubeClient.get()
                 .uri(MediaUrlValidator.mediaUrl(format.url()))
                 .header(HttpHeaders.RANGE, "bytes=0-" + (HEADER_BYTES - 1))
                 .retrieve()
                 .bodyToMono(byte[].class)
-                .map(bytes -> withIndex(format, bytes));
+                .map(bytes -> withIndex(format, bytes))
+                .doOnNext(enriched -> playbackLogs.log(videoId, playbackSession,
+                        "MP4-индекс готов: формат " + format.formatId()));
     }
 
     static UpstreamVideo.Format withIndex(UpstreamVideo.Format format, byte[] bytes) {

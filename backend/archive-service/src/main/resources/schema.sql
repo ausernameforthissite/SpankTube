@@ -46,6 +46,8 @@ alter table archive_jobs add column if not exists width integer;
 alter table archive_jobs add column if not exists height integer;
 alter table archive_jobs add column if not exists video_codec text;
 alter table archive_jobs add column if not exists audio_codec text;
+alter table archive_jobs add column if not exists audio_bitrate bigint;
+alter table archive_jobs add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists archive_job_items (
     id bigserial primary key,
@@ -56,6 +58,13 @@ create table if not exists archive_job_items (
     next_attempt_at timestamptz not null default now(),
     error text,
     unique(job_id, video_id)
+);
+
+create table if not exists archive_job_dismissals (
+    job_id uuid not null references archive_jobs(id) on delete cascade,
+    username text not null,
+    dismissed_at timestamptz not null default now(),
+    primary key(job_id, username)
 );
 
 create index if not exists archive_jobs_order_idx on archive_jobs(status, priority, created_at);

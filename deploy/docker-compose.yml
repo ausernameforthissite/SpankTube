@@ -134,7 +134,7 @@ services:
   catalog-service:
     build:
       context: ..
-      dockerfile: backend/Dockerfile
+      dockerfile: backend/catalog-service/Dockerfile
       args:
         <<: *backend-build-args
         SERVICE: catalog-service

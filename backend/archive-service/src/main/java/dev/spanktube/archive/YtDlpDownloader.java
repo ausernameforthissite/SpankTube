@@ -73,10 +73,11 @@ class YtDlpDownloader {
             Path audio = directory.resolve("audio.mp3");
             Files.deleteIfExists(video);
             Files.deleteIfExists(audio);
+            DownloadProgress.Tracker tracker = new DownloadProgress.Tracker(options);
             List<String> command = new ArrayList<>(List.of(
                     ytDlpExecutable,
                     "--format", format(options),
-                    "--no-mtime",
+                    "--mtime",
                     "--no-playlist",
                     "--no-warnings",
                     "--socket-timeout", "30",
@@ -103,31 +104,43 @@ class YtDlpDownloader {
                 command.add(proxyUrl());
             }
             command.add("https://www.youtube.com/watch?v=" + metadata.videoId());
-            run(command, directory, archiveProperties.downloadTimeout(), estimatedBytes, progress);
+            run(command, directory, archiveProperties.downloadTimeout(), estimatedBytes, progress, tracker);
 
             Path output;
             String extension;
+            java.time.Instant publicationDate = PublicationDate.parse(metadata.publishedAt());
+            java.nio.file.attribute.FileTime modifiedTime;
             if (options.audioOnly()) {
                 Path source = audioSource(directory);
                 output = audio;
-                progress.accept(new DownloadProgress.Snapshot(ArchiveModels.Stage.MUXING, 0, estimatedBytes, 0));
-                run(List.of(ffmpegExecutable, "-y", "-i", source.toString(), "-map", "0:a:0", "-vn",
-                        "-c:a", "libmp3lame", "-q:a", "0", "-map_metadata", "0", "-map_chapters", "0",
-                        output.toString()), directory, Duration.ofMinutes(15), estimatedBytes, progress);
+                modifiedTime = publicationDate == null ? Files.getLastModifiedTime(source)
+                        : java.nio.file.attribute.FileTime.from(publicationDate);
+                progress.accept(tracker.stage(ArchiveModels.Stage.MUXING, 0, 0));
+                List<String> conversion = new ArrayList<>(List.of(ffmpegExecutable, "-y", "-i", source.toString(),
+                        "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "0", "-map_metadata", "0",
+                        "-map_chapters", "0"));
+                if (publicationDate != null) conversion.addAll(List.of("-metadata", "creation_time=" + publicationDate));
+                conversion.add(output.toString());
+                run(conversion, directory, Duration.ofMinutes(15), estimatedBytes, progress, tracker);
                 extension = "mp3";
             } else {
                 output = video;
                 if (!Files.isRegularFile(output)) {
                     throw new ArchiveDownloadException("yt-dlp did not produce an MKV file");
                 }
+                modifiedTime = publicationDate == null ? Files.getLastModifiedTime(output)
+                        : java.nio.file.attribute.FileTime.from(publicationDate);
                 Path remux = directory.resolve("video.remux.mkv");
-                progress.accept(new DownloadProgress.Snapshot(ArchiveModels.Stage.MUXING, 0, estimatedBytes, 0));
-                run(List.of(ffmpegExecutable, "-y", "-i", output.toString(), "-map", "0",
-                        "-c", "copy", "-c:s", "srt", "-map_chapters", "0", "-map_metadata", "0",
-                        remux.toString()), directory, Duration.ofMinutes(15), estimatedBytes, progress);
+                progress.accept(tracker.stage(ArchiveModels.Stage.MUXING, 0, 0));
+                List<String> conversion = new ArrayList<>(List.of(ffmpegExecutable, "-y", "-i", output.toString(),
+                        "-map", "0", "-c", "copy", "-c:s", "srt", "-map_chapters", "0", "-map_metadata", "0"));
+                if (publicationDate != null) conversion.addAll(List.of("-metadata", "creation_time=" + publicationDate));
+                conversion.add(remux.toString());
+                run(conversion, directory, Duration.ofMinutes(15), estimatedBytes, progress, tracker);
                 Files.move(remux, output, StandardCopyOption.REPLACE_EXISTING);
                 extension = "mkv";
             }
+            Files.setLastModifiedTime(output, modifiedTime);
             Path infoJson = directory.resolve(options.audioOnly() ? "audio.info.json" : "video.info.json");
             if (Files.exists(infoJson)) {
                 Files.move(infoJson, directory.resolve("info.json"), StandardCopyOption.REPLACE_EXISTING);
@@ -139,7 +152,9 @@ class YtDlpDownloader {
     }
 
     void discard(ArchiveModels.ExistingVideo metadata) {
-        discard(Path.of(archiveProperties.root()).resolve(metadata.channelId()).resolve(metadata.videoId()));
+        Path archivedPath = Path.of(metadata.archivedPath());
+        discard(archivedPath.isAbsolute() ? archivedPath.getParent()
+                : Path.of(archiveProperties.root()).resolve(archivedPath).getParent());
     }
 
     void discard(Path directory) {
@@ -166,25 +181,39 @@ class YtDlpDownloader {
     private ArchiveModels.DownloadedFile metadata(Path output, String extension,
             ArchiveModels.DownloadOptions options, Path infoJson) throws IOException {
         String probe = run(List.of(ffprobeExecutable, "-v", "error", "-show_entries",
-                "stream=codec_type,codec_name,width,height", "-of", "json", output.toString()),
+                "format=duration:stream=codec_type,codec_name,width,height,bit_rate", "-of", "json", output.toString()),
                 output.getParent(), Duration.ofMinutes(2), 0, progress -> { });
         Integer width = null;
         Integer height = null;
         String videoCodec = null;
         String audioCodec = null;
-        for (JsonNode stream : objectMapper.readTree(probe).path("streams")) {
+        Long audioBitrate = null;
+        JsonNode probeJson = objectMapper.readTree(probe);
+        long durationSeconds = Math.round(probeJson.path("format").path("duration").asDouble(0));
+        for (JsonNode stream : probeJson.path("streams")) {
             if ("video".equals(stream.path("codec_type").asText())) {
                 width = stream.path("width").isNumber() ? stream.path("width").asInt() : null;
                 height = stream.path("height").isNumber() ? stream.path("height").asInt() : null;
                 videoCodec = stream.path("codec_name").asText();
             } else if ("audio".equals(stream.path("codec_type").asText())) {
                 audioCodec = stream.path("codec_name").asText();
+                if (stream.path("bit_rate").isNumber() && stream.path("bit_rate").asLong() > 0) {
+                    audioBitrate = stream.path("bit_rate").asLong();
+                }
             }
         }
         String videoFormat = options.videoFormatId();
         String audioFormat = options.audioFormatId();
         if (Files.isRegularFile(infoJson)) {
-            String selected = objectMapper.readTree(Files.readString(infoJson)).path("format_id").asText("");
+            JsonNode info = objectMapper.readTree(Files.readString(infoJson));
+            if (audioBitrate == null && info.path("abr").isNumber() && info.path("abr").asDouble() > 0) {
+                audioBitrate = Math.round(info.path("abr").asDouble() * 1000);
+            }
+            if (audioBitrate == null && options.audioOnly() && info.path("tbr").isNumber()
+                    && info.path("tbr").asDouble() > 0) {
+                audioBitrate = Math.round(info.path("tbr").asDouble() * 1000);
+            }
+            String selected = info.path("format_id").asText("");
             String[] tracks = selected.split("\\+");
             if (options.audioOnly() && tracks.length > 0) {
                 audioFormat = tracks[0];
@@ -198,7 +227,7 @@ class YtDlpDownloader {
             }
         }
         return new ArchiveModels.DownloadedFile(Files.size(output), width, height, videoCodec, audioCodec,
-                videoFormat, audioFormat, extension);
+                videoFormat, audioFormat, extension, durationSeconds, audioBitrate);
     }
 
     private static String format(ArchiveModels.DownloadOptions options) {
@@ -230,13 +259,18 @@ class YtDlpDownloader {
 
     private String run(List<String> command, Path directory, Duration timeout, long estimatedBytes,
             Consumer<DownloadProgress.Snapshot> progress) {
+        return run(command, directory, timeout, estimatedBytes, progress, new DownloadProgress.Tracker());
+    }
+
+    private String run(List<String> command, Path directory, Duration timeout, long estimatedBytes,
+            Consumer<DownloadProgress.Snapshot> progress, DownloadProgress.Tracker tracker) {
         Process process = null;
         try {
             process = new ProcessBuilder(command).directory(directory.toFile()).start();
             CompletableFuture<String> stdout = readAsync(process.getInputStream(), executableName(command.getFirst()),
-                    estimatedBytes, progress);
+                    estimatedBytes, progress, tracker);
             CompletableFuture<String> stderr = readAsync(process.getErrorStream(), executableName(command.getFirst()),
-                    estimatedBytes, progress);
+                    estimatedBytes, progress, tracker);
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly();
                 throw new ArchiveDownloadException("Process timed out: " + executableName(command.getFirst()));
@@ -290,10 +324,9 @@ class YtDlpDownloader {
     }
 
     private CompletableFuture<String> readAsync(InputStream input, String executable, long estimatedBytes,
-            Consumer<DownloadProgress.Snapshot> progress) {
+            Consumer<DownloadProgress.Snapshot> progress, DownloadProgress.Tracker tracker) {
         return CompletableFuture.supplyAsync(() -> {
             try (input) {
-                DownloadProgress.Tracker tracker = new DownloadProgress.Tracker();
                 return new java.io.BufferedReader(new java.io.InputStreamReader(input, StandardCharsets.UTF_8))
                         .lines()
                         .peek(line -> {

@@ -28,7 +28,7 @@ class UserSettingsController {
     @PatchMapping("/api/v1/users/me/settings")
     @Transactional
     public Settings update(@AuthenticationPrincipal Jwt jwt, @RequestBody SettingsPatch patch) {
-        if (patch.autoplay() == null && patch.hideTechnicalDetails() == null) {
+        if (patch.autoplay() == null && patch.hideTechnicalDetails() == null && patch.preferBestQuality() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No settings to update");
         }
         String username = jwt.getSubject();
@@ -41,18 +41,23 @@ class UserSettingsController {
                     + "on conflict(username) do update set hide_technical_details = excluded.hide_technical_details",
                     username, patch.hideTechnicalDetails());
         }
+        if (patch.preferBestQuality() != null) {
+            jdbc.update("insert into user_settings(username, prefer_best_quality) values (?, ?) "
+                    + "on conflict(username) do update set prefer_best_quality = excluded.prefer_best_quality",
+                    username, patch.preferBestQuality());
+        }
         return current(username);
     }
 
     private Settings current(String username) {
-        return jdbc.query("select autoplay, hide_technical_details from user_settings where username = ?",
-                rs -> rs.next() ? new Settings(rs.getBoolean("autoplay"), rs.getBoolean("hide_technical_details"))
-                        : new Settings(true, false), username);
+        return jdbc.query("select autoplay, hide_technical_details, prefer_best_quality from user_settings where username = ?",
+                rs -> rs.next() ? new Settings(rs.getBoolean("autoplay"), rs.getBoolean("hide_technical_details"),
+                        rs.getBoolean("prefer_best_quality")) : new Settings(true, false, true), username);
     }
 
-    record Settings(boolean autoplay, boolean hideTechnicalDetails) {
+    record Settings(boolean autoplay, boolean hideTechnicalDetails, boolean preferBestQuality) {
     }
 
-    record SettingsPatch(Boolean autoplay, Boolean hideTechnicalDetails) {
+    record SettingsPatch(Boolean autoplay, Boolean hideTechnicalDetails, Boolean preferBestQuality) {
     }
 }

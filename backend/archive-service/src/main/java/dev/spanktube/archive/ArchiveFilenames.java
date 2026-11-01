@@ -15,8 +15,12 @@ final class ArchiveFilenames {
         if (name.length() > 160) {
             name = name.substring(0, 160);
         }
-        return name + " [" + videoId + "] (" + resolution + ", "
-                + codec(file.videoCodec()) + ", " + codec(file.audioCodec()) + ")." + file.extension();
+        return name + " [" + videoId + "] (" + resolution + ", " + codec(file.videoCodec()) + ", "
+                + audioBitrate(file.audioBitrate()) + ", " + codec(file.audioCodec()) + ")." + file.extension();
+    }
+
+    private static String audioBitrate(Long value) {
+        return value == null || value <= 0 ? "unknown" : Math.max(1, Math.round(value / 1000.0)) + "kbps";
     }
 
     private static String codec(String value) {

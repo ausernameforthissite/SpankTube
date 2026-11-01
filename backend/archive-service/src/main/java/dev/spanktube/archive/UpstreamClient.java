@@ -39,7 +39,8 @@ class UpstreamClient {
                 videoId, string(data, "title"), string(data, "publishedAt"), duration,
                 "/archive/" + channelId + "/" + videoId + "/video.mkv", "bv*+ba", 0,
                 video == null ? null : video.width(), video == null ? null : video.height(),
-                video == null ? null : video.codecs(), audio == null ? null : audio.codecs());
+                video == null ? null : video.codecs(), audio == null ? null : audio.codecs(),
+                string(data, "description"), audio == null ? null : audio.bitrate());
         return new VideoDownload(metadata, estimated, formats);
     }
 

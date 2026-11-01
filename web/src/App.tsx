@@ -1,11 +1,14 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import shaka from "shaka-player/dist/shaka-player.compiled.js";
 import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
+import { HistoryMenu } from "./HistoryMenu";
+import { PlaybackLog } from "./PlaybackLog";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
+import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
-import type { ApiFetch, QueueJob, UserSettings, VideoFormat } from "./types";
+import type { ApiFetch, ArchiveAvailability, ArchiveVersion, QueueJob, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -61,6 +64,7 @@ type LibraryItem = {
   height: number | null;
   videoCodec: string | null;
   audioCodec: string | null;
+  audioBitrate: number | null;
   filename: string;
 };
 type LibraryChannel = { channel: Channel; videos: LibraryItem[]; totalBytes: number };
@@ -73,7 +77,7 @@ type UserQuota = {
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
 };
-type Popup = "queue" | "download" | "settings" | null;
+type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | null;
 
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -119,6 +123,15 @@ function formatMB(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(bytes >= 100_000_000 ? 0 : 1)} МБ`;
 }
 
+function archiveFilename(job: QueueJob): string {
+  const extension = job.options.videoFormatId === null && job.options.audioFormatId !== null ? "mp3" : "mkv";
+  const resolution = job.videoCodec ? (job.height ? `${job.height}p` : "unknown") : "audio";
+  const audioBitrate = job.audioBitrate && job.audioBitrate > 0
+    ? `${Math.max(1, Math.round(job.audioBitrate / 1000))}kbps` : "unknown";
+  const title = job.title.replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 160) || job.targetId;
+  return `${title} [${job.targetId}] (${resolution}, ${job.videoCodec || "none"}, ${audioBitrate}, ${job.audioCodec || "none"}).${extension}`;
+}
+
 function formatGB(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} ГиБ`;
 }
@@ -128,6 +141,27 @@ function publicationDate(value: string | null | undefined): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function archiveVideo(version: ArchiveVersion): Video {
+  return {
+    videoId: version.videoId,
+    title: version.title,
+    description: version.description,
+    channelId: version.channelId,
+    channelName: version.channelName,
+    channelAvatarUrl: version.channelAvatarUrl,
+    channelUrl: version.channelUrl,
+    thumbnailUrl: `/media/v/${version.videoId}/thumbnail`,
+    durationSeconds: version.durationSeconds,
+    viewCount: null,
+    likeCount: null,
+    publishedAt: version.publishedAt || "",
+    manifestUrl: `/media/v/${version.videoId}/manifest.mpd`,
+    formats: [],
+    subtitles: [],
+    sponsorBlock: [],
+  };
 }
 
 function readLocation() {
@@ -145,6 +179,13 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchType, setSearchType] = useState("videos");
   const [video, setVideo] = useState<Video | null>(null);
+  const [archiveFile, setArchiveFile] = useState<{ downloadUrl: string; filename: string } | null>(null);
+  const [archiveChecked, setArchiveChecked] = useState(false);
+  const [playbackVersion, setPlaybackVersion] = useState<string | null>(null);
+  const [historyVersions, setHistoryVersions] = useState<ArchiveVersion[]>([]);
+  const refreshJobRef = useRef<string | null>(null);
+  const activeArchiveDurationRef = useRef<number | null>(null);
+  const historySelectionRef = useRef(false);
   const [channel, setChannel] = useState<ChannelPage | null>(null);
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -152,22 +193,39 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryResponse | null>(null);
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
-  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false });
+  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false, preferBestQuality: true });
+  const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
+  const watchProgressRef = useRef(watchProgress);
+  watchProgressRef.current = watchProgress;
+  const progressRequestRef = useRef<Promise<void> | null>(null);
   const autoplayRef = useRef(settings.autoplay);
   autoplayRef.current = settings.autoplay;
+  const preferBestQualityRef = useRef(settings.preferBestQuality);
+  preferBestQualityRef.current = settings.preferBestQuality;
   const [sortMode, setSortMode] = useState("size:desc");
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
+  const [mediaReady, setMediaReady] = useState(false);
+  const controlsReady = playerReady || mediaReady;
+  const authenticated = session !== null;
+  const watchId = location.path === "/watch" ? location.query.get("v") : null;
+  const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, [watchId]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<string[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
+  const [popupPosition, setPopupPosition] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
+  const popupWindowRef = useRef<HTMLDivElement>(null);
+  const popupAnchorRef = useRef<HTMLElement | null>(null);
   const queueButtonRef = useRef<HTMLDivElement>(null);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDownloads = useRef(new Set<string>());
   const downloadedJobs = useRef(new Set<string>());
+  const playerDestroyRef = useRef<Promise<void> | null>(null);
+  const lastTouchTapRef = useRef<{ timeStamp: number; x: number; y: number } | null>(null);
+  const lastTouchSeekRef = useRef(0);
 
   const saveSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
@@ -236,6 +294,50 @@ export default function App() {
     return response;
   }, [ensureAccessToken]);
 
+  const reportProgress = useCallback(async () => {
+    if (!videoElement || !watchId || !Number.isFinite(videoElement.duration) || videoElement.duration <= 0) return;
+    const duration = Math.floor(videoElement.duration);
+    const position = Math.max(0, Math.min(Math.floor(videoElement.currentTime), duration));
+    const progress: WatchProgress = {
+      videoId: watchId,
+      positionSeconds: position,
+      watchPercent: Math.min(100, position * 100 / duration),
+      lastAccessedAt: new Date().toISOString(),
+    };
+    setWatchProgress(current => {
+      const next = { ...current, [watchId]: progress };
+      watchProgressRef.current = next;
+      return next;
+    });
+    try {
+      await apiFetch(`/api/v1/videos/${watchId}/progress`, {
+        method: "POST",
+        body: JSON.stringify({ positionSeconds: position, durationSeconds: duration }),
+      });
+    } catch {
+    }
+  }, [videoElement, watchId, apiFetch]);
+
+  const syncMediaReady = useCallback(() => {
+    if (videoElement?.currentSrc && videoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      setMediaReady(true);
+    }
+  }, [videoElement]);
+
+  useEffect(() => {
+    if (!videoElement) return;
+    syncMediaReady();
+    document.addEventListener("visibilitychange", syncMediaReady);
+    window.addEventListener("pageshow", syncMediaReady);
+    return () => {
+      document.removeEventListener("visibilitychange", syncMediaReady);
+      window.removeEventListener("pageshow", syncMediaReady);
+    };
+  }, [videoElement, syncMediaReady]);
+
+  const playbackLogs = usePlaybackLogs(watchId, playbackSession,
+    Boolean(session) && !controlsReady, apiFetch);
+
   const notify = useCallback((message: string) => {
     document.getElementById("spanktube-toast")?.remove();
     const element = document.createElement("div");
@@ -267,10 +369,10 @@ export default function App() {
 
   const { jobs, beforeYou } = useQueue(Boolean(session), apiFetch);
 
-  const navigate = useCallback((url: string) => {
+  const navigate = useCallback((url: string, preservePopup = false) => {
     window.history.pushState({}, "", url);
     setLocation(readLocation());
-    setPopup(null);
+    if (!preservePopup) setPopup(null);
     window.scrollTo(0, 0);
   }, []);
 
@@ -294,10 +396,19 @@ export default function App() {
   }, [apiFetch]);
 
   useEffect(() => {
-    if (!session) return;
-    apiFetch("/api/v1/users/me/settings")
-      .then(async response => setSettings(await response.json()))
-      .catch(showError);
+    if (!session) {
+      setWatchProgress({});
+      progressRequestRef.current = null;
+      return;
+    }
+    progressRequestRef.current = Promise.all([
+      apiFetch("/api/v1/users/me/settings"),
+      apiFetch("/api/v1/library/progress"),
+    ]).then(async ([settingsResponse, progressResponse]) => {
+      setSettings(await settingsResponse.json());
+      const entries = await progressResponse.json() as WatchProgress[];
+      setWatchProgress(Object.fromEntries(entries.map(entry => [entry.videoId, entry])));
+    }).catch(showError);
   }, [session, apiFetch, showError]);
 
   const updateSettings = async (patch: Partial<UserSettings>) => {
@@ -312,23 +423,101 @@ export default function App() {
     }
   };
 
+  const togglePopup = useCallback((name: Exclude<Popup, null>, anchor: HTMLElement) => {
+    popupAnchorRef.current = anchor;
+    setPopup(current => current === name ? null : name);
+  }, []);
+
+  const updatePopupPosition = useCallback(() => {
+    const element = popupWindowRef.current;
+    const anchor = popupAnchorRef.current;
+    if (!element || !anchor) return;
+    const margin = 24;
+    const gap = 8;
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(540, window.innerWidth - margin * 2);
+    const maxHeight = window.innerHeight - margin * 2;
+    const height = Math.min(element.offsetHeight || maxHeight, maxHeight);
+    let top = rect.bottom + gap;
+    if (top + height > window.innerHeight - margin) {
+      const above = rect.top - height - gap;
+      top = above >= margin ? above : window.innerHeight - height - margin;
+    }
+    top = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+    const next = { left, top, width, maxHeight };
+    setPopupPosition(current => current && current.left === next.left && current.top === next.top
+      && current.width === next.width && current.maxHeight === next.maxHeight ? current : next);
+  }, []);
+
+  useLayoutEffect(() => {
+    updatePopupPosition();
+  }, [popup, updatePopupPosition]);
+
   useEffect(() => {
-    if (!session) return;
+    if (!popup) return;
+    const observer = new ResizeObserver(updatePopupPosition);
+    if (popupWindowRef.current) observer.observe(popupWindowRef.current);
+    window.addEventListener("resize", updatePopupPosition);
+    window.addEventListener("scroll", updatePopupPosition, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePopupPosition);
+      window.removeEventListener("scroll", updatePopupPosition, true);
+    };
+  }, [popup, updatePopupPosition]);
+
+  const applyArchive = useCallback((availability: ArchiveAvailability) => {
+    const version = availability.version;
+    setArchiveFile(availability.archived && availability.downloadUrl && availability.filename
+      ? { downloadUrl: availability.downloadUrl, filename: availability.filename } : null);
+    setPlaybackVersion(version?.versionId || null);
+    activeArchiveDurationRef.current = version?.durationSeconds ?? null;
+    if (version) setVideo(archiveVideo(version));
+    historySelectionRef.current = false;
+    setArchiveChecked(true);
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) return;
     setLoading(true);
     setError(null);
     setActions([]);
     setVideo(null);
+    setArchiveFile(null);
+    setArchiveChecked(false);
+    setPlaybackVersion(null);
+    setHistoryVersions([]);
+    refreshJobRef.current = null;
+    historySelectionRef.current = false;
     setChannel(null);
     setPlaylist(null);
     setResults([]);
     setPlayerReady(false);
+    setMediaReady(false);
     const path = location.path;
     const query = location.query;
     const load = async () => {
       if (path === "/watch") {
         const id = query.get("v") || "";
-        const response = await apiFetch(`/api/v1/videos/${id}`);
-        setVideo(await response.json());
+        const youtubeRequest = apiFetch(`/api/v1/videos/${id}`);
+        try {
+          const archiveResponse = await apiFetch(`/api/v1/videos/${id}/archive`);
+          applyArchive(await archiveResponse.json() as ArchiveAvailability);
+        } catch {
+          setArchiveChecked(true);
+        }
+        const response = await youtubeRequest;
+        const youtubeVideo = await response.json() as Video;
+        if (!historySelectionRef.current) setVideo(youtubeVideo);
+        const archivedDuration = activeArchiveDurationRef.current;
+        if (archivedDuration !== null && youtubeVideo.durationSeconds !== null
+          && archivedDuration !== youtubeVideo.durationSeconds && !refreshJobRef.current) {
+          const refreshResponse = await apiFetch(`/api/v1/videos/${id}/refresh`, { method: "POST" });
+          const refreshJob = await refreshResponse.json() as QueueJob;
+          refreshJobRef.current = refreshJob.id;
+          setPlaybackStatus("Обновление архивной копии…");
+        }
       } else if (path === "/playlist") {
         const id = query.get("list") || "";
         const cursor = query.get("cursor");
@@ -360,16 +549,23 @@ export default function App() {
       }
     };
     load().catch(showError).finally(() => setLoading(false));
-  }, [location, session, apiFetch, loadLibrary, loadUsers, showError]);
+  }, [location, authenticated, apiFetch, loadLibrary, loadUsers, showError, applyArchive]);
 
   useEffect(() => {
-    if (!video || !videoElement) return;
+    if (!watchId || !videoElement || !archiveChecked) return;
     let disposed = false;
     let player: shaka.Player | null = null;
     setPlayerReady(false);
+    setMediaReady(false);
+    setPlaybackStatus("Подготовка видео…");
     const start = async () => {
       shaka.polyfill.installAll();
       if (!shaka.Player.isBrowserSupported()) throw new Error("Этот браузер не поддерживается Shaka Player");
+      if (playerDestroyRef.current) {
+        const previousDestroy = playerDestroyRef.current;
+        playerDestroyRef.current = null;
+        await previousDestroy;
+      }
       player = new shaka.Player();
       await player.attach(videoElement);
       player.configure("streaming.retryParameters.timeout", 120_000);
@@ -390,10 +586,30 @@ export default function App() {
         request.headers.Authorization = `Bearer ${await ensureAccessToken()}`;
       });
       player.addEventListener("error", event => showError((event as CustomEvent<unknown>).detail));
-      await player.load(`${MEDIA_BASE_URL}${video.manifestUrl}`);
+      const manifestParams = new URLSearchParams({ playbackSession });
+      if (playbackVersion) manifestParams.set("version", playbackVersion);
+      await player.load(`${MEDIA_BASE_URL}/media/v/${watchId}/manifest.mpd?${manifestParams}`);
       if (disposed) {
         await player.destroy();
         return;
+      }
+      await progressRequestRef.current;
+      const resume = watchProgressRef.current[watchId];
+      if (resume && resume.positionSeconds > 0 && resume.positionSeconds < videoElement.duration - 1) {
+        videoElement.currentTime = resume.positionSeconds;
+      }
+      player.configure("abr.enabled", !preferBestQualityRef.current);
+      if (preferBestQualityRef.current) {
+        const tracks = player.getVariantTracks();
+        if (tracks.length > 0) {
+          const best = tracks.reduce((current, candidate) => {
+            const candidateHeight = candidate.height || 0;
+            const currentHeight = current.height || 0;
+            return candidateHeight > currentHeight
+              || candidateHeight === currentHeight && candidate.bandwidth > current.bandwidth ? candidate : current;
+          });
+          player.selectVariantTrack(best, true);
+        }
       }
       setPlayerReady(true);
       setPlaybackStatus("Готово к воспроизведению");
@@ -413,9 +629,9 @@ export default function App() {
     return () => {
       disposed = true;
       setPlayerReady(false);
-      if (player) void player.destroy();
+      if (player) playerDestroyRef.current = player.destroy();
     };
-  }, [video, videoElement, ensureAccessToken, showError]);
+  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion]);
 
   useEffect(() => {
     if (!video || !videoElement || !video.sponsorBlock?.length) return;
@@ -434,18 +650,13 @@ export default function App() {
   useEffect(() => {
     if (!video || !videoElement) return;
     const timer = window.setInterval(() => {
-      if (!videoElement.paused && videoElement.duration > 0) {
-        void apiFetch(`/api/v1/videos/${video.videoId}/progress`, {
-          method: "POST",
-          body: JSON.stringify({
-            positionSeconds: Math.floor(videoElement.currentTime),
-            durationSeconds: Math.floor(videoElement.duration),
-          }),
-        }).catch(() => undefined);
-      }
+      if (!videoElement.paused) void reportProgress();
     }, 15_000);
-    return () => window.clearInterval(timer);
-  }, [video, videoElement, apiFetch]);
+    return () => {
+      window.clearInterval(timer);
+      void reportProgress();
+    };
+  }, [video, videoElement, reportProgress]);
 
   const login = async (event: FormEvent) => {
     event.preventDefault();
@@ -489,8 +700,7 @@ export default function App() {
   const downloadJob = useCallback(async (job: QueueJob) => {
     if (!job.downloadUrl) return;
     try {
-      const extension = job.options.videoFormatId === null && job.options.audioFormatId !== null ? "mp3" : "mkv";
-      await downloadBlob(job.downloadUrl, job.fileName || `${job.title} [${job.targetId}].${extension}`);
+      await downloadBlob(job.downloadUrl, job.fileName || archiveFilename(job));
     } catch (reason) {
       showError(reason);
     }
@@ -544,6 +754,27 @@ export default function App() {
     }
   }, [jobs, downloadJob]);
 
+  useEffect(() => {
+    const refreshId = refreshJobRef.current;
+    if (!refreshId || !watchId) return;
+    const job = jobs.find(candidate => candidate.id === refreshId && candidate.targetId === watchId);
+    if (!job) return;
+    if (job.status === "failed") {
+      refreshJobRef.current = null;
+      showError(new RequestError(job.error || "Не удалось обновить архивную копию"));
+      return;
+    }
+    if (job.status !== "completed") return;
+    refreshJobRef.current = null;
+    void apiFetch(`/api/v1/videos/${watchId}/archive`)
+      .then(response => response.json() as Promise<ArchiveAvailability>)
+      .then(availability => {
+        applyArchive(availability);
+        setPlaybackStatus("Архивная копия обновлена");
+      })
+      .catch(showError);
+  }, [jobs, watchId, apiFetch, applyArchive, showError]);
+
   const saveCollection = async (path: string) => {
     setError(null);
     try {
@@ -555,8 +786,29 @@ export default function App() {
     }
   };
 
+  const openHistory = async (anchor: HTMLElement) => {
+    if (!watchId) return;
+    setError(null);
+    try {
+      const response = await apiFetch(`/api/v1/videos/${watchId}/archive/versions`);
+      setHistoryVersions(await response.json() as ArchiveVersion[]);
+      togglePopup("history", anchor);
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
+  const selectHistory = (version: ArchiveVersion) => {
+    historySelectionRef.current = true;
+    setArchiveFile({ downloadUrl: version.downloadUrl, filename: version.filename });
+    setVideo(archiveVideo(version));
+    setPlaybackVersion(version.versionId);
+    setArchiveChecked(true);
+    setPopup(null);
+  };
+
   const togglePlayback = async () => {
-    if (!videoElement || !playerReady) return;
+    if (!videoElement || !controlsReady) return;
     setError(null);
     try {
       if (videoElement.paused) await videoElement.play();
@@ -565,6 +817,53 @@ export default function App() {
       showError(reason);
     }
   };
+
+  const seekFromPointer = useCallback((clientX: number) => {
+    if (!videoElement || !controlsReady || !Number.isFinite(videoElement.duration)) return;
+    const bounds = videoElement.getBoundingClientRect();
+    const offset = clientX < bounds.left + bounds.width / 2 ? -10 : 10;
+    videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + offset));
+  }, [videoElement, controlsReady]);
+
+  const doubleClickSeek = useCallback((event: ReactMouseEvent<HTMLVideoElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientY >= bounds.bottom - 48) return;
+    event.preventDefault();
+    if (Date.now() - lastTouchSeekRef.current < 500) return;
+    seekFromPointer(event.clientX);
+  }, [seekFromPointer]);
+
+  const touchSeek = useCallback((event: ReactPointerEvent<HTMLVideoElement>) => {
+    if (event.pointerType !== "touch" || !event.isPrimary) return;
+    if (!controlsReady) {
+      lastTouchTapRef.current = null;
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientY >= bounds.bottom - 48) {
+      lastTouchTapRef.current = null;
+      return;
+    }
+    const previous = lastTouchTapRef.current;
+    if (previous && event.timeStamp - previous.timeStamp <= 350
+      && Math.abs(event.clientX - previous.x) <= 40 && Math.abs(event.clientY - previous.y) <= 40) {
+      event.preventDefault();
+      lastTouchSeekRef.current = Date.now();
+      lastTouchTapRef.current = null;
+      seekFromPointer(event.clientX);
+    } else {
+      lastTouchTapRef.current = { timeStamp: event.timeStamp, x: event.clientX, y: event.clientY };
+    }
+  }, [controlsReady, seekFromPointer]);
+
+  const dismissJob = useCallback(async (job: QueueJob) => {
+    setError(null);
+    try {
+      await apiFetch(`/api/v1/archive/jobs/${job.id}`, { method: "DELETE" });
+    } catch (reason) {
+      showError(reason);
+    }
+  }, [apiFetch, showError]);
 
   const remove = async (item: LibraryItem) => {
     if (!window.confirm(`Удалить «${item.title}» из своей библиотеки?`)) return;
@@ -620,9 +919,9 @@ export default function App() {
         <button className="secondary" onClick={() => navigate("/library")}>Библиотека</button>
         <div className="split-button" ref={queueButtonRef}>
           <button className="secondary" onClick={() => navigate("/jobs")}>Очередь</button>
-          <button className="secondary split-arrow" aria-label="Показать очередь" onClick={() => setPopup(value => value === "queue" ? null : "queue")}>▼</button>
+          <button className="secondary split-arrow" aria-label="Показать очередь" onClick={event => togglePopup("queue", event.currentTarget)}>▼</button>
         </div>
-        <button className="secondary" onClick={() => setPopup(value => value === "settings" ? null : "settings")}>Настройки</button>
+        <button className="secondary" onClick={event => togglePopup("settings", event.currentTarget)}>Настройки ▼</button>
         {session.role === "ADMIN" && <button className="secondary" onClick={() => navigate("/admin")}>Квоты</button>}
       </nav>
 
@@ -658,31 +957,58 @@ export default function App() {
       {loading && <p className="muted">Загрузка…</p>}
 
       {location.path === "/search" && <>
-        <ResultGrid items={results} navigate={navigate} />
+        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} />
         {searchNextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/search?q=${encodeURIComponent(searchQuery)}&type=${searchType}&cursor=${encodeURIComponent(searchNextCursor)}`)}>Следующая страница</button>}
       </>}
 
-      {location.path === "/watch" && video && (
+      {watchId && (
         <article>
           <section className="player panel">
-            <video ref={setVideoElement} controls={playerReady} playsInline
-              onCanPlay={() => setPlaybackStatus("Готово к воспроизведению")}
-              onPlaying={() => setPlaybackStatus("Воспроизведение")}
-              onWaiting={() => setPlaybackStatus("Буферизация")}
-              onPause={() => setPlaybackStatus("Пауза")} />
+            <div className="video-frame">
+              <video ref={setVideoElement} controls={controlsReady} playsInline
+                aria-label="Видеоплеер. Двойной клик слева — на 10 секунд назад, справа — вперёд"
+                onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek}
+                onLoadedMetadata={syncMediaReady}
+                onCanPlay={() => {
+                  syncMediaReady();
+                  setPlaybackStatus("Готово к воспроизведению");
+                }}
+                onPlaying={() => {
+                  syncMediaReady();
+                  setPlaybackStatus("Воспроизведение");
+                }}
+                onWaiting={() => setPlaybackStatus("Буферизация")}
+                onEmptied={() => setMediaReady(false)}
+                onPause={() => {
+                  syncMediaReady();
+                  setPlaybackStatus("Пауза");
+                  void reportProgress();
+                }} />
+              {!controlsReady && <PlaybackLog lines={playbackLogs} />}
+            </div>
             <div className="playback">
-              <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !playerReady}>
+              <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !controlsReady}>
                 {videoElement?.paused === false ? "Пауза" : "Играть"}
               </button>
-              <button type="button" className="secondary" onClick={archive}>Архивировать</button>
-              <div className="split-button">
-                <button type="button" className="secondary" onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
-                <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания" onClick={() => setPopup(value => value === "download" ? null : "download")}>▼</button>
-              </div>
-              <span>{playbackStatus}</span>
+              {video && <>
+                {archiveFile
+                  ? <button type="button" className="secondary" onClick={() => void downloadBlob(archiveFile.downloadUrl, archiveFile.filename)}>Скачать из архива</button>
+                  : <button type="button" className="secondary" onClick={archive}>Архивировать</button>}
+                {archiveFile && <button type="button" className="secondary" onClick={event => void openHistory(event.currentTarget)}>История ▼</button>}
+                <div className="split-button">
+                  <button type="button" className="secondary" onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
+                  <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания" onClick={event => togglePopup("download", event.currentTarget)}>▼</button>
+                </div>
+              </>}
+              {playbackLogs.length > 0 && <button type="button" className="playback-log-latest"
+                aria-label="Открыть журнал подготовки видео" title={playbackLogs[playbackLogs.length - 1].text}
+                onClick={event => togglePopup("playbackLog", event.currentTarget)}>
+                {playbackLogs[playbackLogs.length - 1].text}
+              </button>}
+              <span className="playback-status">{playbackStatus}</span>
             </div>
           </section>
-          <section className="panel metadata">
+          {video && <section className="panel metadata">
             <div className="channel-line">
               {video.channelAvatarUrl && <img className="avatar" src={video.channelAvatarUrl} alt="" />}
               <button className="link" onClick={() => navigate(video.channelUrl)}>{video.channelName}</button>
@@ -696,7 +1022,7 @@ export default function App() {
                 {video.formats.map(format => <div key={format.formatId}><code>{format.formatId}</code> {format.height ? `${format.height}p` : "audio"} · {format.mimeType} · {format.codecs}</div>)}
               </div>
             </details>
-          </section>
+          </section>}
         </article>
       )}
 
@@ -708,7 +1034,7 @@ export default function App() {
           </div>
           <h2>{playlist.title}</h2>
           <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать плейлист</button>
-          <ResultGrid items={playlist.items} navigate={navigate} />
+          <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} />
           {playlist.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/playlist?list=${playlist.playlistId}&cursor=${encodeURIComponent(playlist.nextCursor!)}`)}>Следующая страница</button>}
         </section>
       )}
@@ -721,10 +1047,10 @@ export default function App() {
           </div>
           <button className="secondary" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`)}>Архивировать канал</button>
           {channel.videos.length > 0 && <h3>Видео</h3>}
-          <ResultGrid items={channel.videos} navigate={navigate} />
+          <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} />
           {channel.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`${channel.url}?cursor=${encodeURIComponent(channel.nextCursor!)}`)}>Следующие видео</button>}
           {channel.playlists.length > 0 && <h3>Плейлисты</h3>}
-          <ResultGrid items={channel.playlists} navigate={navigate} />
+          <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} />
         </section>
       )}
 
@@ -743,8 +1069,11 @@ export default function App() {
               </div>
               {group.videos.map(item => (
                 <div className="library-row" key={item.videoId}>
-                  <img className="library-thumbnail" src={item.thumbnailUrl} alt="" loading="lazy" />
-                  <div className="library-info"><strong>{item.title}</strong><div className="muted">{formatDuration(item.durationSeconds)} · {formatMB(item.sizeBytes)}</div>
+                  <div className="library-thumbnail-frame"><img className="library-thumbnail" src={item.thumbnailUrl} alt="" loading="lazy" /><WatchProgressBar progress={watchProgress[item.videoId]} /></div>
+                  <div className="library-info"><a className="queue-video-link" href={`/watch?v=${encodeURIComponent(item.videoId)}`} onClick={event => {
+                    event.preventDefault();
+                    navigate(`/watch?v=${encodeURIComponent(item.videoId)}`);
+                  }}><strong>{item.title}</strong></a><div className="muted">{formatDuration(item.durationSeconds)} · {formatMB(item.sizeBytes)}</div>
                     {!settings.hideTechnicalDetails && <div className="muted">{item.height ? `${item.height}p` : "—"} · {item.videoCodec || "—"} · {item.audioCodec || "—"}</div>}
                     <div className="filename">{item.filename}</div>
                   </div>
@@ -756,7 +1085,7 @@ export default function App() {
         </section>
       )}
 
-      {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} />}
+      {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={navigate} />}
 
       {location.path === "/admin" && users && (
         <section className="panel metadata">
@@ -770,25 +1099,42 @@ export default function App() {
         </section>
       )}
 
-      {popup && <div className="popup-backdrop" onClick={() => setPopup(null)} />}
-      <div className="popup-window" onClick={event => event.stopPropagation()}>
-        {popup === "queue" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onClose={() => setPopup(null)} compact />}
+      {popup && <div className="popup-backdrop" onPointerDown={() => setPopup(null)} />}
+      <div className="popup-window" ref={popupWindowRef} style={popupPosition || undefined} onClick={event => event.stopPropagation()}>
+        {popup === "queue" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={url => navigate(url, true)} onClose={() => setPopup(null)} compact />}
         {popup === "download" && video && <DownloadMenu formats={video.formats} onDownload={download} onClose={() => setPopup(null)} />}
         {popup === "settings" && <SettingsMenu settings={settings} onChange={updateSettings} onClose={() => setPopup(null)} />}
+        {popup === "history" && <HistoryMenu versions={historyVersions} onSelect={selectHistory} onClose={() => setPopup(null)} />}
+        {popup === "playbackLog" && <section className="playback-log-options" aria-label="Журнал подготовки видео">
+          <div className="popup-header"><button className="popup-close" aria-label="Закрыть журнал" onClick={() => setPopup(null)}>×</button></div>
+          <PlaybackLog lines={playbackLogs} overlay={false} />
+        </section>}
       </div>
     </main>
   );
 }
 
-function ResultGrid({ items, navigate }: { items: SearchItem[]; navigate: (url: string) => void }) {
+function WatchProgressBar({ progress }: { progress?: WatchProgress }) {
+  const percent = progress ? Math.max(0, Math.min(100, progress.watchPercent)) : 0;
+  return <progress className="watch-progress" max={100} value={percent} aria-label={`Прогресс просмотра: ${Math.round(percent)}%`} />;
+}
+
+function ResultGrid({ items, navigate, progressMap }: {
+  items: SearchItem[];
+  navigate: (url: string) => void;
+  progressMap: WatchProgressMap;
+}) {
   return (
     <div className="result-grid">
       {items.map(item => (
         <button className="result-card" key={`${item.kind}:${item.id}`} onClick={() => navigate(item.url)}>
-          {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
-          <span className="result-kind">{item.kind}</span>
+          <div className="result-thumbnail">
+            {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
+            <WatchProgressBar progress={progressMap[item.id]} />
+          </div>
+          <div className="result-kind-row"><span className="result-kind">{item.kind}</span>{item.durationSeconds != null && <span className="result-duration">{formatDuration(item.durationSeconds)}</span>}</div>
           <strong>{item.title}</strong>
-          <span className="muted">{item.channelName || ""}{item.durationSeconds != null ? ` · ${formatDuration(item.durationSeconds)}` : ""}{item.videoCount != null ? ` · ${item.videoCount} видео` : ""}</span>
+          <span className="muted">{item.channelName || ""}{item.videoCount != null ? ` · ${item.videoCount} видео` : ""}</span>
         </button>
       ))}
     </div>

@@ -51,6 +51,36 @@ class ArchiveWorkerTest {
         verify(jobs).completeItem(eq(item), eq(false), contains("429"), anyLong());
     }
 
+    @Test
+    void refreshCreatesSeparateVersionAndUsesFileDuration() {
+        ArchiveModels.JobItem item = item(0);
+        ArchiveModels.Job job = new ArchiveModels.Job(item.jobId(), ArchiveModels.Kind.REFRESH,
+                item.videoId(), "admin", "ADMIN", 0, "running", 8, 0, 0,
+                null, null, null, null, null);
+        when(jobs.claimNextJob()).thenReturn(job);
+        when(jobs.claimNextItem(job.id())).thenReturn(item);
+        ArchiveModels.ExistingVideo metadata = new ArchiveModels.ExistingVideo("", "channel", "Channel",
+                null, null, null, null, item.videoId(), "Video", null, 100L,
+                "channel/" + item.videoId() + "/video.mkv", "bv*+ba", 0);
+        when(upstream.video(item.videoId())).thenReturn(new UpstreamClient.VideoDownload(metadata, 0));
+        when(downloader.download(any(ArchiveModels.ExistingVideo.class), any(ArchiveModels.DownloadOptions.class),
+                any(java.nio.file.Path.class), anyLong(), any())).thenReturn(new ArchiveModels.DownloadedFile(
+                        100, 1920, 1080, "av1", "opus", "399", "251", "mkv", 914L, 131000L));
+        when(publisher.publish(any())).thenReturn(Mono.empty());
+
+        worker().work();
+
+        verify(catalog, never()).existing(any(), any());
+        verify(publisher).publish(org.mockito.ArgumentMatchers.argThat(event -> {
+            if (!(event.payload() instanceof ArchiveModels.ExistingVideo version)) {
+                return false;
+            }
+            return java.nio.file.Path.of(version.archivedPath()).equals(java.nio.file.Path.of(
+                    "/archive/channel/" + item.videoId() + "/" + job.id() + "/video.mkv"))
+                    && version.durationSeconds() == 914 && version.sizeBytes() == 100;
+        }));
+    }
+
     private ArchiveModels.ExistingVideo prepare(ArchiveModels.JobItem item, int attempts) {
         ArchiveModels.Job job = new ArchiveModels.Job(item.jobId(), ArchiveModels.Kind.VIDEO,
                 item.videoId(), "admin", "ADMIN", 0, "running", 1, 0, 0,

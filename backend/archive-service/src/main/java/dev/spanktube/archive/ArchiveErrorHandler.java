@@ -19,4 +19,10 @@ class ArchiveErrorHandler {
     ResponseEntity<String> downstream(RestClientResponseException error) {
         return ResponseEntity.status(error.getStatusCode()).body(error.getResponseBodyAsString());
     }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<Map<String, String>> unexpected(Exception error) {
+        org.slf4j.LoggerFactory.getLogger(ArchiveErrorHandler.class).error("Unhandled archive API error", error);
+        return ResponseEntity.internalServerError().body(Map.of("message", "Internal archive error"));
+    }
 }

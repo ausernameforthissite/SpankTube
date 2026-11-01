@@ -34,6 +34,39 @@ alter table videos add column if not exists width integer;
 alter table videos add column if not exists height integer;
 alter table videos add column if not exists video_codec text;
 alter table videos add column if not exists audio_codec text;
+alter table videos add column if not exists description text;
+alter table videos add column if not exists audio_bitrate bigint;
+
+create table if not exists video_versions (
+    id uuid primary key,
+    video_id text not null,
+    channel_id text not null,
+    title text not null,
+    description text,
+    published_at text,
+    duration_sec bigint,
+    archived_path text not null unique,
+    quality text,
+    size_bytes bigint not null,
+    width integer,
+    height integer,
+    video_codec text,
+    audio_codec text,
+    created_at timestamptz not null default now(),
+    superseded_at timestamptz
+);
+
+alter table video_versions add column if not exists deleted_at timestamptz;
+alter table video_versions add column if not exists audio_bitrate bigint;
+
+insert into video_versions(id, video_id, channel_id, title, description, published_at, duration_sec,
+    archived_path, quality, size_bytes, width, height, video_codec, audio_codec, audio_bitrate)
+select gen_random_uuid(), video_id, channel_id, title, description, published_at, duration_sec,
+    archived_path, quality, size_bytes, width, height, video_codec, audio_codec, audio_bitrate from videos
+on conflict(archived_path) do nothing;
+
+create index if not exists video_versions_history_idx on video_versions(video_id, created_at desc);
+create index if not exists video_versions_current_idx on video_versions(video_id, superseded_at);
 
 create index if not exists user_views_lru_idx on user_views(user_id, last_accessed_at);
 create index if not exists user_views_video_idx on user_views(video_id);

@@ -51,7 +51,7 @@ class ArchiveWorker {
                     jobs.completeDownload(job, matching, downloaded(matching), false);
                     return;
                 }
-            } else {
+            } else if (job.kind() != ArchiveModels.Kind.REFRESH) {
                 ArchiveModels.ExistingVideo existing = catalogClient.existing(job.ownerUsername(), item.videoId())
                         .orElse(null);
                 if (existing != null) {
@@ -65,24 +65,34 @@ class ArchiveWorker {
             jobs.progress(job.id(), new DownloadProgress.Snapshot(ArchiveModels.Stage.METADATA, 0, 0, 0));
             UpstreamClient.VideoDownload download = upstreamClient.video(item.videoId());
             metadata = download.metadata();
+            if (job.kind() == ArchiveModels.Kind.REFRESH) {
+                metadata = metadata.withArchivedPath(Path.of(properties.root(), metadata.channelId(), metadata.videoId(),
+                        job.id(), "video.mkv").toString());
+            }
             UpstreamClient.Selection selection = download.select(options);
             jobs.metadata(job.id(), metadata.title(), selection.estimatedBytes(),
                     selection.video() == null ? null : selection.video().width(),
                     selection.video() == null ? null : selection.video().height(),
                     selection.video() == null ? null : selection.video().codecs(),
-                    selection.audio() == null ? null : selection.audio().codecs());
+                    selection.audio() == null ? null : selection.audio().codecs(),
+                    selection.audio() == null ? null : selection.audio().bitrate());
             if (job.kind() != ArchiveModels.Kind.DOWNLOAD && selection.estimatedBytes() > 0) {
-                catalogClient.prepare(job.ownerUsername(), selection.estimatedBytes(), item.videoId());
+                catalogClient.prepare(job.ownerUsername(), selection.estimatedBytes(), item.videoId(),
+                        job.kind() == ArchiveModels.Kind.REFRESH);
             }
             Path directory = job.kind() == ArchiveModels.Kind.DOWNLOAD
                     ? Path.of(properties.root(), ".downloads", job.id())
+                    : job.kind() == ArchiveModels.Kind.REFRESH
+                    ? Path.of(properties.root(), metadata.channelId(), metadata.videoId(), job.id())
                     : Path.of(properties.root(), metadata.channelId(), metadata.videoId());
             if (job.kind() == ArchiveModels.Kind.DOWNLOAD) {
                 temporaryDirectory = directory;
             }
-            jobs.progress(job.id(), new DownloadProgress.Snapshot(ArchiveModels.Stage.DOWNLOADING,
-                    0, selection.estimatedBytes(), 0));
-            ArchiveModels.DownloadedFile file = downloader.download(metadata, options, directory,
+            ArchiveModels.DownloadOptions selectedOptions = new ArchiveModels.DownloadOptions(
+                    selection.video() == null ? null : selection.video().formatId(),
+                    selection.audio() == null ? null : selection.audio().formatId(),
+                    options.subtitles(), options.sponsorBlock());
+            ArchiveModels.DownloadedFile file = downloader.download(metadata, selectedOptions, directory,
                     selection.estimatedBytes(), progress -> jobs.progress(job.id(), progress));
             jobs.progress(job.id(), new DownloadProgress.Snapshot(ArchiveModels.Stage.FINISHING,
                     file.sizeBytes(), file.sizeBytes(), 0));
@@ -91,15 +101,17 @@ class ArchiveWorker {
                 jobs.completeDownload(job, metadata, file, true);
                 return;
             }
-            catalogClient.prepare(job.ownerUsername(), file.sizeBytes(), item.videoId());
+            catalogClient.prepare(job.ownerUsername(), file.sizeBytes(), item.videoId(),
+                    job.kind() == ArchiveModels.Kind.REFRESH);
             String quality = file.videoFormatId() == null ? metadata.quality()
                     : file.videoFormatId() + "+" + file.audioFormatId();
             ArchiveModels.ExistingVideo completed = new ArchiveModels.ExistingVideo(
                     job.ownerUsername(), metadata.channelId(), metadata.channelName(), metadata.channelHandle(),
                     metadata.channelCustomPath(), metadata.channelAvatarUrl(), metadata.channelSubscriberCount(),
-                    metadata.videoId(), metadata.title(), metadata.publishedAt(), metadata.durationSeconds(),
+                    metadata.videoId(), metadata.title(), metadata.publishedAt(),
+                    file.durationSeconds() == null ? metadata.durationSeconds() : file.durationSeconds(),
                     metadata.archivedPath(), quality, file.sizeBytes(), file.width(), file.height(),
-                    file.videoCodec(), file.audioCodec());
+                    file.videoCodec(), file.audioCodec(), metadata.description(), file.audioBitrate());
             publishAttempted = true;
             publisher.publish(DomainEvent.of("video.archived", completed)).block();
             jobs.completeItem(item, true, null, nextDelay());

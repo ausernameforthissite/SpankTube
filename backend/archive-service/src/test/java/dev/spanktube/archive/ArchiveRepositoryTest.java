@@ -26,7 +26,7 @@ class ArchiveRepositoryTest {
         ArgumentCaptor<Object[]> parameters = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(contains("insert into archive_jobs"), parameters.capture());
         assertThat(parameters.getValue()[0]).isInstanceOf(UUID.class);
-        assertThat(parameters.getValue()).contains("admin", "ADMIN", "VIDEO", "3TYZjVzWazE", 0, 1);
+        assertThat(parameters.getValue()).contains("admin", "ADMIN", "VIDEO", "3TYZjVzWazE", 0, 8);
         verify(jdbc).update(contains("insert into archive_job_items"), any(Object[].class));
     }
 
@@ -39,5 +39,14 @@ class ArchiveRepositoryTest {
         assertThat(sql.getValue()).contains("j.status in ('queued', 'running')")
                 .contains("i.status = 'queued'")
                 .contains("order by j.priority, j.created_at");
+    }
+
+    @Test
+    void queueHidesOldFailuresAndDismissedJobs() {
+        repository.jobs("viewer", false, null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).query(sql.capture(), any(org.springframework.jdbc.core.RowMapper.class), any(Object[].class));
+        assertThat(sql.getValue()).contains("interval '1 hour'").contains("archive_job_dismissals");
     }
 }

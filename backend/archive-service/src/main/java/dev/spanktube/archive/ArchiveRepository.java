@@ -25,7 +25,10 @@ class ArchiveRepository {
         jdbc.update("insert into archive_jobs(id, owner_id, owner_role, kind, target_id, priority, status, total_count, "
                         + "options_key, title) values (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
                 id, request.owner(), request.role(), request.kind().name(), request.targetId(), priority,
-                request.videoIds().size(), request.options().signature(), request.targetId());
+                request.kind() == ArchiveModels.Kind.VIDEO || request.kind() == ArchiveModels.Kind.DOWNLOAD
+                        || request.kind() == ArchiveModels.Kind.REFRESH
+                        ? request.options().stageCount() : request.videoIds().size(),
+                request.options().signature(), request.targetId());
         request.videoIds().forEach(videoId -> jdbc.update(
                 "insert into archive_job_items(job_id, video_id, status) values (?, ?, 'queued') "
                         + "on conflict(job_id, video_id) do nothing", id, videoId));
@@ -34,7 +37,7 @@ class ArchiveRepository {
 
     String activeVideoJob(String videoId, String owner) {
         return jdbc.query("select j.id from archive_job_items i join archive_jobs j on j.id = i.job_id "
-                        + "where i.video_id = ? and j.owner_id = ? and j.kind = 'VIDEO' "
+                        + "where i.video_id = ? and j.owner_id = ? and j.kind in ('VIDEO', 'REFRESH') "
                         + "and i.status in ('queued', 'running') and j.status in ('queued', 'running') "
                         + "order by j.created_at desc limit 1",
                 rs -> rs.next() ? rs.getString(1) : null, videoId, owner);
@@ -50,12 +53,13 @@ class ArchiveRepository {
         String jobId = createJob(request);
         jdbc.update("update archive_job_items set status = 'completed', error = null where job_id = ?",
                 UUID.fromString(jobId));
-        jdbc.update("update archive_jobs set status = 'completed', stage = 'COMPLETED', completed_count = 1, "
+        jdbc.update("update archive_jobs set updated_at = now(), status = 'completed', stage = 'COMPLETED', completed_count = total_count, "
                         + "finished_at = now(), download_url = '/api/v1/library/' || target_id || '/file', "
                         + "file_path = ?, temporary_file = false, bytes_downloaded = ?, total_bytes = ?, speed_bps = 0, "
-                        + "title = ?, width = ?, height = ?, video_codec = ?, audio_codec = ? where id = ?",
+                        + "title = ?, width = ?, height = ?, video_codec = ?, audio_codec = ?, audio_bitrate = ? where id = ?",
                 archived.archivedPath(), archived.sizeBytes(), archived.sizeBytes(), archived.title(),
-                archived.width(), archived.height(), archived.videoCodec(), archived.audioCodec(), UUID.fromString(jobId));
+                archived.width(), archived.height(), archived.videoCodec(), archived.audioCodec(), archived.audioBitrate(),
+                UUID.fromString(jobId));
         return jobId;
     }
 
@@ -85,7 +89,7 @@ class ArchiveRepository {
     }
 
     void markJobRunning(String jobId) {
-        jdbc.update("update archive_jobs set status = 'running', stage = 'METADATA', "
+        jdbc.update("update archive_jobs set updated_at = now(), status = 'running', stage = 'METADATA', "
                 + "started_at = coalesce(started_at, now()) where id = ?", UUID.fromString(jobId));
     }
 
@@ -100,38 +104,43 @@ class ArchiveRepository {
 
     void markItemRunning(long itemId) {
         jdbc.update("update archive_job_items set status = 'running', attempts = attempts + 1 where id = ?", itemId);
-        jdbc.update("update archive_jobs set current_video_id = (select video_id from archive_job_items where id = ?), "
+        jdbc.update("update archive_jobs set updated_at = now(), current_video_id = (select video_id from archive_job_items where id = ?), "
                 + "stage = 'METADATA', bytes_downloaded = 0, total_bytes = 0, speed_bps = 0 "
                 + "where id = (select job_id from archive_job_items where id = ?)", itemId, itemId);
     }
 
     void updateMetadata(String jobId, String title, long estimatedBytes, Integer width, Integer height,
-            String videoCodec, String audioCodec) {
-        jdbc.update("update archive_jobs set title = ?, total_bytes = ?, width = ?, height = ?, "
-                + "video_codec = ?, audio_codec = ? where id = ?", title, estimatedBytes, width, height,
-                videoCodec, audioCodec, UUID.fromString(jobId));
+            String videoCodec, String audioCodec, Long audioBitrate) {
+        jdbc.update("update archive_jobs set updated_at = now(), title = ?, total_bytes = ?, width = ?, height = ?, "
+                + "video_codec = ?, audio_codec = ?, audio_bitrate = ?, completed_count = greatest(completed_count, 1) where id = ?",
+                title, estimatedBytes, width, height, videoCodec, audioCodec, audioBitrate, UUID.fromString(jobId));
     }
 
-    void updateProgress(String jobId, ArchiveModels.Stage stage, long downloaded, long total, long speed) {
-        jdbc.update("update archive_jobs set stage = ?, bytes_downloaded = ?, "
-                + "total_bytes = case when ? > 0 then ? else total_bytes end, speed_bps = ? where id = ?",
-                stage.name(), Math.max(0, downloaded), total, total, Math.max(0, speed), UUID.fromString(jobId));
+    void updateProgress(String jobId, ArchiveModels.Stage stage, long downloaded, long total, long speed,
+            int completedCount) {
+        jdbc.update("update archive_jobs set updated_at = now(), stage = ?, bytes_downloaded = ?, "
+                + "total_bytes = case when ? > 0 then ? else total_bytes end, speed_bps = ?, "
+                + "completed_count = case when ? >= 0 then greatest(completed_count, ?) else completed_count end where id = ?",
+                stage.name(), Math.max(0, downloaded), total, total, Math.max(0, speed), completedCount,
+                completedCount, UUID.fromString(jobId));
     }
 
     void completeItem(long itemId, boolean success, String error, long nextDelaySeconds) {
         jdbc.update("update archive_job_items set status = ?, error = ?, next_attempt_at = now() + (? * interval '1 second') "
                         + "where id = ?", success ? "completed" : "failed", error, nextDelaySeconds, itemId);
         if (success) {
-            jdbc.update("update archive_jobs set completed_count = completed_count + 1, "
-                    + "stage = case when completed_count + 1 >= total_count then 'COMPLETED' else 'QUEUED' end, "
-                    + "download_url = case when kind = 'VIDEO' and completed_count + 1 >= total_count "
-                    + "then '/api/v1/library/' || target_id || '/file' else download_url end, speed_bps = 0 where id = "
+            jdbc.update("update archive_jobs set updated_at = now(), completed_count = case when kind in ('VIDEO', 'DOWNLOAD', 'REFRESH') "
+                    + "then total_count else completed_count + 1 end, "
+                    + "stage = case when kind in ('VIDEO', 'DOWNLOAD', 'REFRESH') or completed_count + 1 >= total_count "
+                    + "then 'COMPLETED' else 'QUEUED' end, "
+                    + "download_url = case when kind in ('VIDEO', 'REFRESH') then '/api/v1/library/' || target_id || '/file' "
+                    + "else download_url end, speed_bps = 0 where id = "
                     + "(select job_id from archive_job_items where id = ?)", itemId);
         } else {
-            jdbc.update("update archive_jobs set failed_count = failed_count + 1, "
-                    + "stage = case when completed_count + failed_count + 1 >= total_count then 'FAILED' else 'QUEUED' end "
-                    + "where id = (select job_id from archive_job_items where id = ?)", itemId);
-            jdbc.update("update archive_jobs set error = ? where id = "
+            jdbc.update("update archive_jobs set updated_at = now(), failed_count = failed_count + 1, "
+                    + "stage = case when kind in ('VIDEO', 'DOWNLOAD', 'REFRESH') or completed_count + failed_count + 1 >= total_count "
+                    + "then 'FAILED' else 'QUEUED' end where id = (select job_id from archive_job_items where id = ?)", itemId);
+            jdbc.update("update archive_jobs set updated_at = now(), error = ? where id = "
                     + "(select job_id from archive_job_items where id = ?)", error, itemId);
         }
     }
@@ -139,12 +148,12 @@ class ArchiveRepository {
     void completeDownload(String jobId, String title, String path, String filename, boolean temporary,
             ArchiveModels.DownloadedFile file) {
         jdbc.update("update archive_job_items set status = 'completed', error = null where job_id = ?", UUID.fromString(jobId));
-        jdbc.update("update archive_jobs set status = 'completed', stage = 'COMPLETED', completed_count = 1, "
+        jdbc.update("update archive_jobs set updated_at = now(), status = 'completed', stage = 'COMPLETED', completed_count = total_count, "
                 + "finished_at = now(), download_url = '/api/v1/archive/jobs/' || id || '/file', "
                 + "file_path = ?, file_name = ?, temporary_file = ?, bytes_downloaded = ?, total_bytes = ?, speed_bps = 0, "
-                + "title = ?, width = ?, height = ?, video_codec = ?, audio_codec = ? where id = ?",
+                + "title = ?, width = ?, height = ?, video_codec = ?, audio_codec = ?, audio_bitrate = ? where id = ?",
                 path, filename, temporary, file.sizeBytes(), file.sizeBytes(), title, file.width(), file.height(),
-                file.videoCodec(), file.audioCodec(), UUID.fromString(jobId));
+                file.videoCodec(), file.audioCodec(), file.audioBitrate(), UUID.fromString(jobId));
     }
 
     JobFile file(String jobId) {
@@ -161,35 +170,40 @@ class ArchiveRepository {
     }
 
     void removeExpiredFile(String jobId) {
-        jdbc.update("update archive_jobs set stage = 'EXPIRED', download_url = null, file_path = null, "
+        jdbc.update("update archive_jobs set updated_at = now(), stage = 'EXPIRED', download_url = null, file_path = null, "
                 + "file_name = null, temporary_file = false where id = ?", UUID.fromString(jobId));
     }
 
     void recoverInterruptedJobs() {
         jdbc.update("update archive_job_items set status = 'queued', next_attempt_at = now() where status = 'running'");
-        jdbc.update("update archive_jobs set status = 'queued', stage = 'QUEUED', speed_bps = 0, finished_at = null "
+        jdbc.update("update archive_jobs set updated_at = now(), status = 'queued', stage = 'QUEUED', speed_bps = 0, finished_at = null "
                 + "where status = 'running' and exists (select 1 from archive_job_items "
                 + "where job_id = archive_jobs.id and status = 'queued')");
-        jdbc.update("update archive_jobs set status = case when failed_count = 0 then 'completed' else 'failed' end, "
-                + "finished_at = now() where status = 'running' and completed_count + failed_count >= total_count");
+        jdbc.update("update archive_jobs set updated_at = now(), status = case when failed_count = 0 then 'completed' else 'failed' end, "
+                + "finished_at = now() where status = 'running' and (failed_count > 0 or completed_count >= total_count)");
     }
 
     void finishJob(String jobId) {
-        jdbc.update("update archive_jobs set status = case when failed_count = 0 then 'completed' else 'failed' end, "
+        jdbc.update("update archive_jobs set updated_at = now(), status = case when failed_count = 0 then 'completed' else 'failed' end, "
                 + "error = case when failed_count = 0 then null else error end, "
-                + "finished_at = now() where id = ? and completed_count + failed_count >= total_count", UUID.fromString(jobId));
+                + "finished_at = now() where id = ? and (failed_count > 0 or completed_count >= total_count)",
+                UUID.fromString(jobId));
     }
 
     void deferItem(long itemId, long delaySeconds, String error) {
         jdbc.update("update archive_job_items set status = 'queued', error = ?, "
                 + "next_attempt_at = now() + (? * interval '1 second') where id = ?", error, delaySeconds, itemId);
-        jdbc.update("update archive_jobs set error = ?, stage = 'WAITING', speed_bps = 0 where id = "
+        jdbc.update("update archive_jobs set updated_at = now(), error = ?, stage = 'WAITING', speed_bps = 0 where id = "
                 + "(select job_id from archive_job_items where id = ?)", error, itemId);
     }
 
     List<ArchiveModels.Job> jobs(String owner, boolean admin, String status) {
-        StringBuilder sql = new StringBuilder("select * from archive_jobs where true");
+        StringBuilder sql = new StringBuilder("select * from archive_jobs where true "
+                + "and (status <> 'failed' or finished_at >= now() - interval '1 hour') "
+                + "and not exists (select 1 from archive_job_dismissals d "
+                + "where d.job_id = archive_jobs.id and d.username = ?)");
         java.util.List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(owner);
         if (!admin) {
             sql.append(" and owner_id = ?");
             parameters.add(owner);
@@ -203,6 +217,11 @@ class ArchiveRepository {
         }
         sql.append(" order by priority, created_at");
         return jdbc.query(sql.toString(), (rs, rowNum) -> mapJob(rs), parameters.toArray());
+    }
+
+    void dismiss(String jobId, String username) {
+        jdbc.update("insert into archive_job_dismissals(job_id, username) values (?, ?) on conflict do nothing",
+                UUID.fromString(jobId), username);
     }
 
     long waitingAhead(String username) {
@@ -238,7 +257,8 @@ class ArchiveRepository {
                 rs.getString("title") == null ? rs.getString("target_id") : rs.getString("title"),
                 rs.getObject("width", Integer.class), rs.getObject("height", Integer.class),
                 rs.getString("video_codec"), rs.getString("audio_codec"), options(rs.getString("options_key")),
-                rs.getString("current_video_id"), rs.getString("file_name"));
+                rs.getString("current_video_id"), rs.getString("file_name"), rs.getString("updated_at"),
+                rs.getObject("audio_bitrate", Long.class));
     }
 
     private static ArchiveModels.DownloadOptions options(String signature) {

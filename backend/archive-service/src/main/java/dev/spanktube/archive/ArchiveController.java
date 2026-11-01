@@ -42,6 +42,11 @@ class ArchiveController {
         return enqueue(ArchiveModels.Kind.VIDEO, videoId, List.of(videoId), request);
     }
 
+    @PostMapping("/api/v1/videos/{videoId}/refresh")
+    ResponseEntity<ArchiveModels.Job> refreshVideo(@PathVariable String videoId, HttpServletRequest request) {
+        return enqueue(ArchiveModels.Kind.REFRESH, videoId, List.of(videoId), request);
+    }
+
     @PostMapping("/api/v1/videos/{videoId}/download")
     ResponseEntity<ArchiveModels.Job> downloadVideo(@PathVariable String videoId,
             @RequestBody DownloadRequest options, HttpServletRequest request) {
@@ -77,6 +82,16 @@ class ArchiveController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Archive job not found");
         }
         return job;
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/api/v1/archive/jobs/{jobId}")
+    ResponseEntity<Void> dismiss(@PathVariable String jobId, HttpServletRequest request) {
+        ArchiveModels.Job job = job(jobId, request);
+        if (!"completed".equals(job.status()) && !"failed".equals(job.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only completed jobs can be dismissed");
+        }
+        jobs.dismiss(jobId, username(request));
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/archive/jobs/{jobId}/file")

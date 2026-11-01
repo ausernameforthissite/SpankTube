@@ -34,7 +34,7 @@ export function DownloadMenu({ formats, onDownload, onClose }: {
 
   return (
     <section className="download-options" aria-label="Вариант скачивания">
-      <button className="popup-close" aria-label="Закрыть выбор скачивания" onClick={onClose}>×</button>
+      <div className="popup-header"><button className="popup-close" aria-label="Закрыть выбор скачивания" onClick={onClose}>×</button></div>
       <div className="format-columns">
         <fieldset>
           <legend>Видео</legend>

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,21 @@ class LibraryServiceTest {
 
         verify(quotaClient, never()).resolve("viewer");
         verify(repository, never()).oldestLink("viewer");
+    }
+
+    @Test
+    void additionalVersionChecksQuotaWithoutDeletingHistory() {
+        when(repository.hasLink("viewer", "video")).thenReturn(true);
+        when(quotaClient.resolve("viewer")).thenReturn(new LibraryModels.QuotaResponse(
+                "viewer", "VIEWER", null, 100, 90));
+        when(repository.usage("viewer")).thenReturn(85L);
+        when(repository.oldestLink("viewer")).thenReturn(null);
+        LibraryService service = service();
+
+        assertThatThrownBy(() -> service.prepare("viewer", 10, "video", true))
+                .isInstanceOf(QuotaExceededException.class)
+                .hasMessageContaining("preserved");
+        verify(repository, never()).deleteLink(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -61,6 +77,39 @@ class LibraryServiceTest {
 
         assertThat(shared).exists();
         assertThat(orphan).doesNotExist();
+        assertThat(archiveRoot.resolve("channel/old")).doesNotExist();
+        assertThat(archiveRoot.resolve("channel/shared")).exists();
+    }
+
+    @Test
+    void startupCleanupRemovesOnlyEmptyDirectories() throws Exception {
+        Path empty = Files.createDirectories(archiveRoot.resolve("empty/nested"));
+        Path video = Files.createDirectories(archiveRoot.resolve("channel/video")).resolve("video.mkv");
+        Files.writeString(video, "video");
+
+        service().removeEmptyDirectories();
+
+        assertThat(empty).doesNotExist();
+        assertThat(archiveRoot.resolve("empty")).doesNotExist();
+        assertThat(video).exists();
+        assertThat(video.getParent()).exists();
+    }
+
+    @Test
+    void globallyArchivedFileCanBeDownloadedWithoutPersonalLink() throws Exception {
+        Path file = Files.createDirectories(archiveRoot.resolve("channel/video")).resolve("video.mkv");
+        Files.writeString(file, "video");
+        Files.writeString(file.getParent().resolve("info.json"), "{\"description\":\"Archived description\"}");
+        when(repository.existing("another", "video")).thenReturn(event("viewer", "video"));
+        when(repository.currentVersion("another", "video")).thenReturn(new CatalogRepository.VersionedVideo(
+                "version-id", event("viewer", "video"), null, null));
+        LibraryService service = service();
+
+        assertThat(service.file("another", "video").path()).isEqualTo(file);
+        assertThat(service.archiveAvailability("another", "video").archived()).isTrue();
+        assertThat(service.archiveAvailability("another", "video").version().description())
+                .isEqualTo("Archived description");
+        verify(repository, never()).hasLink("another", "video");
     }
 
     private LibraryService service() {
