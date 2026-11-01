@@ -12,11 +12,17 @@ final class LibraryModels {
     }
 
     record Video(String videoId, String title, String publishedAt, Long durationSeconds,
-            String archivedPath, String quality, long sizeBytes, String lastAccessedAt) {
+            String archivedPath, String quality, long sizeBytes, String lastAccessedAt,
+            Integer width, Integer height, String videoCodec, String audioCodec) {
     }
 
     record LibraryItem(String videoId, String title, long durationSeconds,
-            long sizeBytes, double sizeMB, String downloadUrl, String lastAccessedAt) {
+            long sizeBytes, double sizeMB, String downloadUrl, String lastAccessedAt,
+            String thumbnailUrl, Integer width, Integer height, String videoCodec, String audioCodec,
+            String filename) {
+    }
+
+    record FileDownload(java.nio.file.Path path, String filename) {
     }
 
     record LibraryChannel(Channel channel, List<LibraryItem> videos, long totalBytes) {

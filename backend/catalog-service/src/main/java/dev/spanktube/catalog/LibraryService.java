@@ -89,16 +89,15 @@ class LibraryService {
         return true;
     }
 
-    Path file(String username, String videoId) {
+    LibraryModels.FileDownload file(String username, String videoId) {
         if (!repository.hasLink(username, videoId)) {
             return null;
         }
-        String path = repository.library(username).stream()
-                .filter(video -> video.videoId().equals(videoId))
+        LibraryModels.Video video = repository.library(username).stream()
+                .filter(candidate -> candidate.videoId().equals(videoId))
                 .findFirst()
-                .map(LibraryModels.Video::archivedPath)
                 .orElse(null);
-        return path == null ? null : safePath(path);
+        return video == null ? null : new LibraryModels.FileDownload(safePath(video.archivedPath()), filename(video));
     }
 
     List<LibraryModels.StorageUser> storageUsers() {
@@ -115,7 +114,24 @@ class LibraryService {
         return new LibraryModels.LibraryItem(video.videoId(), video.title(),
                 video.durationSeconds() == null ? 0 : video.durationSeconds(), video.sizeBytes(),
                 video.sizeBytes() / 1_000_000.0, "/api/v1/library/" + video.videoId() + "/file",
-                video.lastAccessedAt());
+                video.lastAccessedAt(), "/media/v/" + video.videoId() + "/thumbnail",
+                video.width(), video.height(), video.videoCodec(), video.audioCodec(), filename(video));
+    }
+
+    private static String filename(LibraryModels.Video video) {
+        String title = video.title().replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (title.isBlank()) {
+            title = video.videoId();
+        }
+        if (title.length() > 160) {
+            title = title.substring(0, 160);
+        }
+        String resolution = video.videoCodec() == null ? "audio"
+                : video.height() == null ? "unknown" : video.height() + "p";
+        String videoCodec = video.videoCodec() == null ? "none" : video.videoCodec();
+        String audioCodec = video.audioCodec() == null ? "none" : video.audioCodec();
+        return title + " [" + video.videoId() + "] (" + resolution + ", "
+                + videoCodec + ", " + audioCodec + ").mkv";
     }
 
     private Comparator<LibraryModels.LibraryItem> itemComparator(String sort, String direction) {

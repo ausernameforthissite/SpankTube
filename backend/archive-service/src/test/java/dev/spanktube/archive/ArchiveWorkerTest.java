@@ -28,11 +28,12 @@ class ArchiveWorkerTest {
     void rateLimitKeepsPartialFilesForRetryAndUsesLongBackoff() {
         ArchiveModels.JobItem item = item(0);
         ArchiveModels.ExistingVideo metadata = prepare(item, 0);
-        when(downloader.download(metadata)).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
+        when(downloader.download(eq(metadata), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
+                anyLong(), any())).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
 
         worker().work();
 
-        verify(downloader, never()).discard(any());
+        verify(downloader, never()).discard(any(ArchiveModels.ExistingVideo.class));
         verify(jobs).deferItem(eq(item), longThat(delay -> delay >= 60), contains("429"));
     }
 
@@ -40,7 +41,8 @@ class ArchiveWorkerTest {
     void finalRateLimitFailureRemovesUnregisteredFiles() {
         ArchiveModels.JobItem item = item(2);
         ArchiveModels.ExistingVideo metadata = prepare(item, 2);
-        when(downloader.download(metadata)).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
+        when(downloader.download(eq(metadata), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
+                anyLong(), any())).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
         when(publisher.publish(any())).thenReturn(Mono.empty());
 
         worker().work();

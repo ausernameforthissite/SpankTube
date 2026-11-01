@@ -46,9 +46,9 @@ class GatewaySecurityConfiguration {
     CorsWebFilter corsFilter(GatewayProperties properties) {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(properties.allowedOrigins());
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Range", "If-Range"));
-        configuration.setExposedHeaders(List.of("Content-Length", "Content-Range", "Accept-Ranges", "ETag"));
+        configuration.setExposedHeaders(List.of("Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Content-Disposition"));
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

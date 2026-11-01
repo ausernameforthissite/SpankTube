@@ -1,6 +1,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import shaka from "shaka-player/dist/shaka-player.compiled.js";
 import type { components } from "./api/schema";
+import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
+import { QueuePanel } from "./QueuePanel";
+import { SettingsMenu } from "./SettingsMenu";
+import { useQueue } from "./useQueue";
+import type { ApiFetch, QueueJob, UserSettings, VideoFormat } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -15,7 +20,8 @@ type Channel = {
   subscriberCount: number | null;
   nextCursor: string | null;
 };
-type Video = BaseVideo & {
+type Video = Omit<BaseVideo, "formats"> & {
+  formats: VideoFormat[];
   channelAvatarUrl: string | null;
   channelUrl: string;
   thumbnailUrl: string | null;
@@ -50,26 +56,15 @@ type LibraryItem = {
   sizeMB: number;
   downloadUrl: string;
   lastAccessedAt: string;
+  thumbnailUrl: string;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  filename: string;
 };
 type LibraryChannel = { channel: Channel; videos: LibraryItem[]; totalBytes: number };
 type LibraryResponse = { channels: LibraryChannel[]; usedBytes: number; quotaBytes: number; lruThresholdPercent: number };
-type ArchiveJob = {
-  id: string;
-  kind: "VIDEO" | "PLAYLIST" | "CHANNEL";
-  targetId: string;
-  ownerUsername: string;
-  ownerRole: string;
-  priority: number;
-  status: string;
-  totalCount: number;
-  completedCount: number;
-  failedCount: number;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  nextAttemptAt: string | null;
-  error: string | null;
-};
 type UserQuota = {
   username: string;
   role: string;
@@ -78,6 +73,7 @@ type UserQuota = {
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
 };
+type Popup = "queue" | "download" | "settings" | null;
 
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -127,6 +123,13 @@ function formatGB(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} ГиБ`;
 }
 
+function publicationDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
 function readLocation() {
   return { path: window.location.pathname, query: new URLSearchParams(window.location.search) };
 }
@@ -147,9 +150,11 @@ export default function App() {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryResponse | null>(null);
-  const [jobs, setJobs] = useState<ArchiveJob[]>([]);
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
+  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false });
+  const autoplayRef = useRef(settings.autoplay);
+  autoplayRef.current = settings.autoplay;
   const [sortMode, setSortMode] = useState("size:desc");
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
@@ -157,6 +162,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<string[]>([]);
+  const [popup, setPopup] = useState<Popup>(null);
+  const toastRef = useRef<HTMLDivElement>(null);
+  const queueButtonRef = useRef<HTMLDivElement>(null);
+  const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDownloads = useRef(new Set<string>());
+  const downloadedJobs = useRef(new Set<string>());
 
   const saveSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
@@ -215,7 +227,7 @@ export default function App() {
     }
   }, []);
 
-  const apiFetch = useCallback(async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const apiFetch = useCallback<ApiFetch>(async (path, init = {}) => {
     const token = await ensureAccessToken();
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
@@ -225,9 +237,30 @@ export default function App() {
     return response;
   }, [ensureAccessToken]);
 
+  const notify = useCallback((message: string) => {
+    const toast = toastRef.current;
+    if (toast) {
+      toast.textContent = message;
+      toast.hidden = false;
+      toast.showPopover();
+    }
+    const queue = queueButtonRef.current;
+    if (queue) queue.classList.add("queue-pulse");
+    if (pulseTimer.current) clearTimeout(pulseTimer.current);
+    pulseTimer.current = setTimeout(() => queue?.classList.remove("queue-pulse"), 5000);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => toast?.hidePopover(), 5000);
+  }, []);
+
+  const onQueueJob = useCallback((job: QueueJob) => {
+    notify(job.purpose === "DOWNLOAD" ? "Задание на скачивание создано" : "Архивация поставлена в очередь");
+  }, [notify]);
+  const { jobs, beforeYou } = useQueue(Boolean(session), apiFetch, onQueueJob);
+
   const navigate = useCallback((url: string) => {
     window.history.pushState({}, "", url);
     setLocation(readLocation());
+    setPopup(null);
     window.scrollTo(0, 0);
   }, []);
 
@@ -243,17 +276,31 @@ export default function App() {
     setLibrary(await response.json());
   }, [apiFetch, sortMode]);
 
-  const loadJobs = useCallback(async () => {
-    const response = await apiFetch("/api/v1/archive/jobs");
-    setJobs(await response.json());
-  }, [apiFetch]);
-
   const loadUsers = useCallback(async () => {
     const response = await apiFetch("/api/v1/admin/users");
     const data = await response.json() as UserQuota[];
     setUsers(data);
     setQuotaDrafts(Object.fromEntries(data.map(user => [user.username, String(Math.round(user.effectiveQuotaBytes / 1024 / 1024 / 1024))])));
   }, [apiFetch]);
+
+  useEffect(() => {
+    if (!session) return;
+    apiFetch("/api/v1/users/me/settings")
+      .then(async response => setSettings(await response.json()))
+      .catch(showError);
+  }, [session, apiFetch, showError]);
+
+  const updateSettings = async (patch: Partial<UserSettings>) => {
+    const previous = settings;
+    setSettings(current => ({ ...current, ...patch }));
+    try {
+      const response = await apiFetch("/api/v1/users/me/settings", { method: "PATCH", body: JSON.stringify(patch) });
+      setSettings(await response.json());
+    } catch (reason) {
+      setSettings(previous);
+      showError(reason);
+    }
+  };
 
   useEffect(() => {
     if (!session) return;
@@ -294,18 +341,16 @@ export default function App() {
           const response = await apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=${type}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
           const data = await response.json() as SearchResults;
           setResults(data.items);
-          setSearchNextCursor(data.nextCursor!);
+          setSearchNextCursor(data.nextCursor);
         }
       } else if (path === "/library") {
         await loadLibrary();
-      } else if (path === "/jobs") {
-        await loadJobs();
       } else if (path === "/admin") {
         await loadUsers();
       }
     };
     load().catch(showError).finally(() => setLoading(false));
-  }, [location, session, apiFetch, loadJobs, loadLibrary, loadUsers, showError]);
+  }, [location, session, apiFetch, loadLibrary, loadUsers, showError]);
 
   useEffect(() => {
     if (!video || !videoElement) return;
@@ -336,10 +381,22 @@ export default function App() {
       });
       player.addEventListener("error", event => showError((event as CustomEvent<unknown>).detail));
       await player.load(`${MEDIA_BASE_URL}${video.manifestUrl}`);
-      if (disposed) await player.destroy();
-      else {
-        setPlayerReady(true);
-        setPlaybackStatus("Готово к воспроизведению");
+      if (disposed) {
+        await player.destroy();
+        return;
+      }
+      setPlayerReady(true);
+      setPlaybackStatus("Готово к воспроизведению");
+      if (autoplayRef.current) {
+        try {
+          await videoElement.play();
+        } catch (reason) {
+          if (reason instanceof DOMException && reason.name === "NotAllowedError") {
+            setPlaybackStatus("Нажмите «Играть»");
+          } else {
+            showError(reason);
+          }
+        }
       }
     };
     start().catch(showError);
@@ -407,11 +464,81 @@ export default function App() {
     navigate(`/search?q=${encodeURIComponent(searchQuery)}&type=${searchType}`);
   };
 
-  const save = async (path: string) => {
+  const downloadBlob = useCallback(async (url: string, filename: string) => {
+    const response = await apiFetch(url);
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+  }, [apiFetch]);
+
+  const downloadJob = useCallback(async (job: QueueJob) => {
+    if (!job.downloadUrl) return;
+    try {
+      const extension = job.options.videoFormatId === null && job.options.audioFormatId !== null ? "mp3" : "mkv";
+      await downloadBlob(job.downloadUrl, job.fileName || `${job.title} [${job.targetId}].${extension}`);
+    } catch (reason) {
+      showError(reason);
+    }
+  }, [downloadBlob, showError]);
+
+  const archive = async () => {
+    if (!video) return;
+    setError(null);
+    notify("Архивация ставится в очередь");
+    try {
+      const response = await apiFetch(`/api/v1/videos/${video.videoId}/save`, { method: "POST" });
+      if (response.status === 202) notify("Архивация поставлена в очередь");
+      else notify("Архивация этого видео уже идёт");
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
+  const download = async (options: DownloadOptions) => {
+    if (!video) return;
     setError(null);
     try {
-      await apiFetch(path, { method: "POST" });
-      navigate("/jobs");
+      const response = await apiFetch(`/api/v1/videos/${video.videoId}/download`, {
+        method: "POST",
+        body: JSON.stringify(options),
+      });
+      const job = await response.json() as QueueJob;
+      setPopup(null);
+      if (job.status === "completed" && job.downloadUrl) {
+        downloadedJobs.current.add(job.id);
+        await downloadJob(job);
+        notify("Файл готов к скачиванию");
+      } else {
+        pendingDownloads.current.add(job.id);
+        notify("Задание на скачивание создано");
+      }
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
+  useEffect(() => {
+    for (const job of jobs) {
+      if (job.kind === "DOWNLOAD" && job.status === "completed" && job.downloadUrl
+        && pendingDownloads.current.has(job.id) && !downloadedJobs.current.has(job.id)) {
+        downloadedJobs.current.add(job.id);
+        pendingDownloads.current.delete(job.id);
+        void downloadJob(job);
+      }
+    }
+  }, [jobs, downloadJob]);
+
+  const saveCollection = async (path: string) => {
+    setError(null);
+    try {
+      const response = await apiFetch(path, { method: "POST" });
+      if (response.status === 202) notify("Пакетная архивация поставлена в очередь");
+      else notify("Эта архивация уже идёт");
     } catch (reason) {
       showError(reason);
     }
@@ -423,20 +550,6 @@ export default function App() {
     try {
       if (videoElement.paused) await videoElement.play();
       else videoElement.pause();
-    } catch (reason) {
-      showError(reason);
-    }
-  };
-
-  const download = async (item: LibraryItem) => {
-    try {
-      const response = await apiFetch(item.downloadUrl);
-      const url = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${item.videoId}.mkv`;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (reason) {
       showError(reason);
     }
@@ -494,10 +607,15 @@ export default function App() {
         <button className="secondary" onClick={() => navigate("/")}>Видео</button>
         <button className="secondary" onClick={() => navigate("/search")}>Поиск</button>
         <button className="secondary" onClick={() => navigate("/library")}>Библиотека</button>
-        <button className="secondary" onClick={() => navigate("/jobs")}>Очередь</button>
+        <div className="split-button" ref={queueButtonRef}>
+          <button className="secondary" onClick={() => navigate("/jobs")}>Очередь</button>
+          <button className="secondary split-arrow" aria-label="Показать очередь" onClick={() => setPopup(value => value === "queue" ? null : "queue")}>▼</button>
+        </div>
+        <button className="secondary" onClick={() => setPopup(value => value === "settings" ? null : "settings")}>Настройки</button>
         {session.role === "ADMIN" && <button className="secondary" onClick={() => navigate("/admin")}>Квоты</button>}
       </nav>
 
+      <div className="toast" role="status" popover="manual" ref={toastRef} />
       {location.path === "/" && (
         <section className="panel">
           <form className="video-search" onSubmit={watchVideo}>
@@ -546,7 +664,11 @@ export default function App() {
               <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !playerReady}>
                 {videoElement?.paused === false ? "Пауза" : "Играть"}
               </button>
-              <button type="button" className="secondary" onClick={() => save(`/api/v1/videos/${video.videoId}/save`)}>Скачать</button>
+              <button type="button" className="secondary" onClick={archive}>Архивировать</button>
+              <div className="split-button">
+                <button type="button" className="secondary" onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
+                <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания" onClick={() => setPopup(value => value === "download" ? null : "download")}>▼</button>
+              </div>
               <span>{playbackStatus}</span>
             </div>
           </section>
@@ -556,7 +678,7 @@ export default function App() {
               <button className="link" onClick={() => navigate(video.channelUrl)}>{video.channelName}</button>
             </div>
             <h2>{video.title}</h2>
-            <p className="stats">Публикация: {video.publishedAt || "—"} · {formatDuration(video.durationSeconds)} · {video.viewCount == null ? "—" : `${number.format(video.viewCount)} просмотров`} · {video.likeCount == null ? "—" : `${number.format(video.likeCount)} лайков`}{video.dislikeCountEstimate == null ? "" : ` · ≈${number.format(video.dislikeCountEstimate)} дизлайков`}</p>
+            <p className="stats">Публикация: {publicationDate(video.publishedAt)} · {formatDuration(video.durationSeconds)} · {video.viewCount == null ? "—" : `${number.format(video.viewCount)} просмотров`} · {video.likeCount == null ? "—" : `${number.format(video.likeCount)} лайков`}{video.dislikeCountEstimate == null ? "" : ` · ≈${number.format(video.dislikeCountEstimate)} дизлайков`}</p>
             <p className="description">{video.description || "Описание отсутствует"}</p>
             <details>
               <summary>Форматы ({video.formats.length}), субтитры ({video.subtitles.length}), SponsorBlock ({video.sponsorBlock?.length || 0})</summary>
@@ -575,7 +697,7 @@ export default function App() {
             <button className="link" onClick={() => navigate(playlist.channel.url)}>{playlist.channel.title}</button>
           </div>
           <h2>{playlist.title}</h2>
-          <button className="secondary" onClick={() => save(`/api/v1/playlists/${playlist.playlistId}/save`)}>Скачать плейлист</button>
+          <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать плейлист</button>
           <ResultGrid items={playlist.items} navigate={navigate} />
           {playlist.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/playlist?list=${playlist.playlistId}&cursor=${encodeURIComponent(playlist.nextCursor!)}`)}>Следующая страница</button>}
         </section>
@@ -587,7 +709,7 @@ export default function App() {
             <img className="avatar large" src={channel.avatarUrl} alt="" />
             <div><h2>{channel.title}</h2><p className="muted">{channel.subscriberCount == null ? "" : `${number.format(channel.subscriberCount)} подписчиков`}</p></div>
           </div>
-          <button className="secondary" onClick={() => save(`/api/v1/channels/${channel.channelId}/save`)}>Скачать канал</button>
+          <button className="secondary" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`)}>Архивировать канал</button>
           {channel.videos.length > 0 && <h3>Видео</h3>}
           <ResultGrid items={channel.videos} navigate={navigate} />
           {channel.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`${channel.url}?cursor=${encodeURIComponent(channel.nextCursor!)}`)}>Следующие видео</button>}
@@ -599,7 +721,7 @@ export default function App() {
       {location.path === "/library" && library && (
         <section>
           <div className="panel stats">Использовано {formatGB(library.usedBytes)} из {formatGB(library.quotaBytes)} · LRU при {library.lruThresholdPercent}%</div>
-          <label className="panel">Сортировка: <select value={sortMode} onChange={event => { setSortMode(event.target.value); setTimeout(loadLibrary, 0); }}>
+          <label className="panel">Сортировка: <select value={sortMode} onChange={event => setSortMode(event.target.value)}>
             <option value="size:desc">Сначала большие</option><option value="size:asc">Сначала маленькие</option><option value="duration:desc">По длительности</option><option value="title:asc">По названию</option>
           </select></label>
           {library.channels.map(group => (
@@ -611,8 +733,12 @@ export default function App() {
               </div>
               {group.videos.map(item => (
                 <div className="library-row" key={item.videoId}>
-                  <div><strong>{item.title}</strong><div className="muted">{formatDuration(item.durationSeconds)} · {formatMB(item.sizeBytes)}</div></div>
-                  <div className="row-actions"><button className="secondary" onClick={() => download(item)}>MKV</button><button className="danger" onClick={() => remove(item)}>Удалить</button></div>
+                  <img className="library-thumbnail" src={item.thumbnailUrl} alt="" loading="lazy" />
+                  <div className="library-info"><strong>{item.title}</strong><div className="muted">{formatDuration(item.durationSeconds)} · {formatMB(item.sizeBytes)}</div>
+                    {!settings.hideTechnicalDetails && <div className="muted">{item.height ? `${item.height}p` : "—"} · {item.videoCodec || "—"} · {item.audioCodec || "—"}</div>}
+                    <div className="filename">{item.filename}</div>
+                  </div>
+                  <div className="row-actions"><button className="secondary" onClick={() => void downloadBlob(item.downloadUrl, item.filename)}>MKV</button><button className="danger" onClick={() => remove(item)}>Удалить</button></div>
                 </div>
               ))}
             </section>
@@ -620,17 +746,7 @@ export default function App() {
         </section>
       )}
 
-      {location.path === "/jobs" && (
-        <section className="panel metadata">
-          <button className="secondary" onClick={loadJobs}>Обновить</button>
-          {jobs.map(job => (
-            <div className="job-row" key={job.id}>
-              <div><strong>{job.kind} · {job.targetId}</strong><div className="muted">{job.ownerUsername} · приоритет {job.priority} · {job.status} · {job.completedCount + job.failedCount}/{job.totalCount}</div></div>
-              {job.error && <div className="error-inline">{job.error}</div>}
-            </div>
-          ))}
-        </section>
-      )}
+      {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} />}
 
       {location.path === "/admin" && users && (
         <section className="panel metadata">
@@ -643,6 +759,13 @@ export default function App() {
           ))}
         </section>
       )}
+
+      {popup && <div className="popup-backdrop" onClick={() => setPopup(null)} />}
+      <div className="popup-window" onClick={event => event.stopPropagation()}>
+        {popup === "queue" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onClose={() => setPopup(null)} compact />}
+        {popup === "download" && video && <DownloadMenu formats={video.formats} onDownload={download} onClose={() => setPopup(null)} />}
+        {popup === "settings" && <SettingsMenu settings={settings} onChange={updateSettings} onClose={() => setPopup(null)} />}
+      </div>
     </main>
   );
 }
@@ -652,7 +775,7 @@ function ResultGrid({ items, navigate }: { items: SearchItem[]; navigate: (url: 
     <div className="result-grid">
       {items.map(item => (
         <button className="result-card" key={`${item.kind}:${item.id}`} onClick={() => navigate(item.url)}>
-          {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" />}
+          {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
           <span className="result-kind">{item.kind}</span>
           <strong>{item.title}</strong>
           <span className="muted">{item.channelName || ""}{item.durationSeconds != null ? ` · ${formatDuration(item.durationSeconds)}` : ""}{item.videoCount != null ? ` · ${item.videoCount} видео` : ""}</span>

@@ -14,5 +14,18 @@ public record ArchiveCompletedEvent(
         Long durationSeconds,
         String archivedPath,
         String quality,
-        long sizeBytes) {
+        long sizeBytes,
+        Integer width,
+        Integer height,
+        String videoCodec,
+        String audioCodec) {
+
+    public ArchiveCompletedEvent(String ownerUsername, String channelId, String channelName, String channelHandle,
+            String channelCustomPath, String channelAvatarUrl, Long channelSubscriberCount,
+            String videoId, String title, String publishedAt, Long durationSeconds,
+            String archivedPath, String quality, long sizeBytes) {
+        this(ownerUsername, channelId, channelName, channelHandle, channelCustomPath, channelAvatarUrl,
+                channelSubscriberCount, videoId, title, publishedAt, durationSeconds, archivedPath, quality,
+                sizeBytes, null, null, null, null);
+    }
 }

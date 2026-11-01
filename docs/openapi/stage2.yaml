@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SpankTube Stage 2 API
-  version: 0.2.0
+  version: 0.3.0
 paths:
   /api/v1/auth/login:
     post:
@@ -172,6 +172,26 @@ paths:
       responses:
         '202':
           description: Progress accepted; archiving starts at 30 seconds or 5 percent
+  /api/v1/videos/{videoId}/download:
+    post:
+      operationId: downloadStage2Video
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DownloadOptions' }
+      responses:
+        '200':
+          description: Ready file or reusable variant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
+        '202':
+          description: New background download job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveJob' }
   /api/v1/videos/{videoId}/save:
     post:
       operationId: saveStage2Video
@@ -217,6 +237,33 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/archive/events:
+    get:
+      operationId: streamStage2Queue
+      responses:
+        '200':
+          description: Server-sent queue updates and heartbeat; only own jobs and aggregate waiting count
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/QueueSnapshot' }
+  /api/v1/archive/jobs/{jobId}/file:
+    get:
+      operationId: downloadStage2JobFile
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Completed MKV or MP3 with a meaningful filename
+          content:
+            video/x-matroska:
+              schema: { type: string, format: binary }
+            audio/mpeg:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/archive/jobs/{jobId}:
     get:
       operationId: getStage2ArchiveJob
@@ -276,6 +323,28 @@ paths:
           description: User link removed; physical file removed only with the last link
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/users/me/settings:
+    get:
+      operationId: getStage2Settings
+      responses:
+        '200':
+          description: Current user's settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSettings' }
+    patch:
+      operationId: updateStage2Settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingsPatch' }
+      responses:
+        '200':
+          description: Updated settings; fields not present in the request are unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSettings' }
   /api/v1/admin/users:
     get:
       operationId: getStage2Users
@@ -442,7 +511,10 @@ components:
         formatId: { type: string }
         mimeType: { type: [string, 'null'] }
         codecs: { type: [string, 'null'] }
+        width: { type: [integer, 'null'] }
         height: { type: [integer, 'null'] }
+        fps: { type: [number, 'null'] }
+        bitrate: { type: [integer, 'null'], format: int64 }
         hasVideo: { type: boolean }
         hasAudio: { type: boolean }
         segmentUrl: { type: string }
@@ -503,6 +575,12 @@ components:
         sizeMB: { type: number }
         downloadUrl: { type: string }
         lastAccessedAt: { type: string, format: date-time }
+        thumbnailUrl: { type: string, description: media-service URL }
+        width: { type: [integer, 'null'] }
+        height: { type: [integer, 'null'] }
+        videoCodec: { type: [string, 'null'] }
+        audioCodec: { type: [string, 'null'] }
+        filename: { type: string, description: '<YouTube title> [<videoId>] (<resolution>, <video codec>, <audio codec>).mkv' }
     LibraryChannel:
       type: object
       required: [channel, videos, totalBytes]
@@ -522,17 +600,45 @@ components:
         usedBytes: { type: integer, format: int64 }
         quotaBytes: { type: integer, format: int64 }
         lruThresholdPercent: { type: integer, enum: [90] }
+    QueueSnapshot:
+      type: object
+      required: [jobs, beforeYou]
+      properties:
+        jobs:
+          type: array
+          items: { $ref: '#/components/schemas/ArchiveJob' }
+        beforeYou: { type: integer, format: int64, description: Count only; no other users' metadata }
+    DownloadOptions:
+      type: object
+      required: [subtitles, sponsorBlock]
+      properties:
+        videoFormatId: { type: [string, 'null'], description: Null selects best video or audio-only with a selected audio track }
+        audioFormatId: { type: [string, 'null'], description: Null selects best audio or video-only with a selected video track }
+        subtitles: { type: boolean, default: true, description: Human-created subtitles only }
+        sponsorBlock: { type: boolean, default: true }
+    UserSettings:
+      type: object
+      required: [autoplay, hideTechnicalDetails]
+      properties:
+        autoplay: { type: boolean, default: true }
+        hideTechnicalDetails: { type: boolean, default: false }
+    SettingsPatch:
+      type: object
+      minProperties: 1
+      properties:
+        autoplay: { type: boolean }
+        hideTechnicalDetails: { type: boolean }
     ArchiveJob:
       type: object
-      required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt]
+      required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt, purpose, stage, bytesDownloaded, totalBytes, speedBps, title, options]
       properties:
         id: { type: string, format: uuid }
-        kind: { type: string, enum: [VIDEO, PLAYLIST, CHANNEL] }
+        kind: { type: string, enum: [VIDEO, PLAYLIST, CHANNEL, DOWNLOAD] }
         targetId: { type: string }
         ownerUsername: { type: string }
         ownerRole: { type: string, enum: [VIEWER, ADMIN] }
         priority: { type: integer }
-        status: { type: string, enum: [queued, running, completed, failed, cancelled] }
+        status: { type: string, enum: [queued, running, completed, failed] }
         totalCount: { type: integer }
         completedCount: { type: integer }
         failedCount: { type: integer }
@@ -541,6 +647,20 @@ components:
         finishedAt: { type: [string, 'null'], format: date-time }
         nextAttemptAt: { type: [string, 'null'], format: date-time }
         error: { type: [string, 'null'] }
+        purpose: { type: string, enum: [ARCHIVE, DOWNLOAD] }
+        stage: { type: string, enum: [QUEUED, WAITING, METADATA, DOWNLOADING, SUBTITLES, MUXING, CHAPTERS, FINISHING, COMPLETED, FAILED, EXPIRED] }
+        bytesDownloaded: { type: integer, format: int64, minimum: 0 }
+        totalBytes: { type: integer, format: int64, minimum: 0 }
+        speedBps: { type: integer, format: int64, minimum: 0 }
+        downloadUrl: { type: [string, 'null'] }
+        title: { type: string }
+        width: { type: [integer, 'null'] }
+        height: { type: [integer, 'null'] }
+        videoCodec: { type: [string, 'null'] }
+        audioCodec: { type: [string, 'null'] }
+        currentVideoId: { type: [string, 'null'], description: Item currently being downloaded or processed }
+        fileName: { type: [string, 'null'] }
+        options: { $ref: '#/components/schemas/DownloadOptions' }
     EffectiveQuota:
       type: object
       required: [username, role, quotaBytes, effectiveQuotaBytes, lruThresholdPercent]

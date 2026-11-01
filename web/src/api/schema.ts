@@ -196,6 +196,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videos/{videoId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["downloadStage2Video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{videoId}/save": {
         parameters: {
             query?: never;
@@ -260,6 +276,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/archive/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamStage2Queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/jobs/{jobId}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["downloadStage2JobFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/archive/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -306,6 +354,22 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateStage2Settings"];
         trace?: never;
     };
     "/api/v1/admin/users": {
@@ -431,7 +495,11 @@ export interface components {
             formatId: string;
             mimeType?: string | null;
             codecs?: string | null;
+            width?: number | null;
             height?: number | null;
+            fps?: number | null;
+            /** Format: int64 */
+            bitrate?: number | null;
             hasVideo: boolean;
             hasAudio: boolean;
             segmentUrl: string;
@@ -484,6 +552,14 @@ export interface components {
             downloadUrl: string;
             /** Format: date-time */
             lastAccessedAt: string;
+            /** @description media-service URL */
+            thumbnailUrl?: string;
+            width?: number | null;
+            height?: number | null;
+            videoCodec?: string | null;
+            audioCodec?: string | null;
+            /** @description <YouTube title> [<videoId>] (<resolution>, <video codec>, <audio codec>).mkv */
+            filename?: string;
         };
         LibraryChannel: {
             channel: components["schemas"]["Channel"];
@@ -500,18 +576,49 @@ export interface components {
             /** @enum {integer} */
             lruThresholdPercent: 90;
         };
+        QueueSnapshot: {
+            jobs: components["schemas"]["ArchiveJob"][];
+            /**
+             * Format: int64
+             * @description Count only; no other users' metadata
+             */
+            beforeYou: number;
+        };
+        DownloadOptions: {
+            /** @description Null selects best video or audio-only with a selected audio track */
+            videoFormatId?: string | null;
+            /** @description Null selects best audio or video-only with a selected video track */
+            audioFormatId?: string | null;
+            /**
+             * @description Human-created subtitles only
+             * @default true
+             */
+            subtitles: boolean;
+            /** @default true */
+            sponsorBlock: boolean;
+        };
+        UserSettings: {
+            /** @default true */
+            autoplay: boolean;
+            /** @default false */
+            hideTechnicalDetails: boolean;
+        };
+        SettingsPatch: {
+            autoplay?: boolean;
+            hideTechnicalDetails?: boolean;
+        };
         ArchiveJob: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "VIDEO" | "PLAYLIST" | "CHANNEL";
+            kind: "VIDEO" | "PLAYLIST" | "CHANNEL" | "DOWNLOAD";
             targetId: string;
             ownerUsername: string;
             /** @enum {string} */
             ownerRole: "VIEWER" | "ADMIN";
             priority: number;
             /** @enum {string} */
-            status: "queued" | "running" | "completed" | "failed" | "cancelled";
+            status: "queued" | "running" | "completed" | "failed";
             totalCount: number;
             completedCount: number;
             failedCount: number;
@@ -524,6 +631,26 @@ export interface components {
             /** Format: date-time */
             nextAttemptAt?: string | null;
             error?: string | null;
+            /** @enum {string} */
+            purpose: "ARCHIVE" | "DOWNLOAD";
+            /** @enum {string} */
+            stage: "QUEUED" | "WAITING" | "METADATA" | "DOWNLOADING" | "SUBTITLES" | "MUXING" | "CHAPTERS" | "FINISHING" | "COMPLETED" | "FAILED" | "EXPIRED";
+            /** Format: int64 */
+            bytesDownloaded: number;
+            /** Format: int64 */
+            totalBytes: number;
+            /** Format: int64 */
+            speedBps: number;
+            downloadUrl?: string | null;
+            title: string;
+            width?: number | null;
+            height?: number | null;
+            videoCodec?: string | null;
+            audioCodec?: string | null;
+            /** @description Item currently being downloaded or processed */
+            currentVideoId?: string | null;
+            fileName?: string | null;
+            options: components["schemas"]["DownloadOptions"];
         };
         EffectiveQuota: {
             username: string;
@@ -888,6 +1015,41 @@ export interface operations {
             };
         };
     };
+    downloadStage2Video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadOptions"];
+            };
+        };
+        responses: {
+            /** @description Ready file or reusable variant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+            /** @description New background download job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveJob"];
+                };
+            };
+        };
+    };
     saveStage2Video: {
         parameters: {
             query?: never;
@@ -976,6 +1138,50 @@ export interface operations {
             };
         };
     };
+    streamStage2Queue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-sent queue updates and heartbeat; only own jobs and aggregate waiting count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["QueueSnapshot"];
+                };
+            };
+        };
+    };
+    downloadStage2JobFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completed MKV or MP3 with a meaningful filename */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/x-matroska": string;
+                    "audio/mpeg": string;
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
     getStage2ArchiveJob: {
         parameters: {
             query?: never;
@@ -1047,6 +1253,50 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["Error"];
+        };
+    };
+    getStage2Settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
+                };
+            };
+        };
+    };
+    updateStage2Settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated settings; fields not present in the request are unchanged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
+                };
+            };
         };
     };
     getStage2Users: {

@@ -73,16 +73,17 @@ class LibraryController {
 
     @GetMapping("/api/v1/library/{videoId}/file")
     ResponseEntity<InputStreamResource> file(@PathVariable String videoId, HttpServletRequest request) throws Exception {
-        Path file = libraryService.file(identityService.required(request).username(), videoId);
-        if (file == null || !Files.isRegularFile(file)) {
+        LibraryModels.FileDownload file = libraryService.file(identityService.required(request).username(), videoId);
+        if (file == null || !Files.isRegularFile(file.path())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Archived file not found");
         }
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("video/x-matroska"))
-                .contentLength(Files.size(file))
+                .contentLength(Files.size(file.path()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition.attachment().filename(videoId + ".mkv").build().toString())
-                .body(new InputStreamResource(Files.newInputStream(file)));
+                        ContentDisposition.attachment().filename(file.filename(), java.nio.charset.StandardCharsets.UTF_8)
+                                .build().toString())
+                .body(new InputStreamResource(Files.newInputStream(file.path())));
     }
 
     @DeleteMapping("/api/v1/library/{videoId}")

@@ -27,7 +27,6 @@ class YtDlpResponseParser {
         }
         List<SubtitleTrack> subtitles = new ArrayList<>();
         parseSubtitles(root.path("subtitles"), false, subtitles);
-        parseSubtitles(root.path("automatic_captions"), true, subtitles);
 
         String publishedAt = root.path("timestamp").isNumber()
                 ? Instant.ofEpochSecond(root.path("timestamp").asLong()).toString()

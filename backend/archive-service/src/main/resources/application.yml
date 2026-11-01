@@ -31,6 +31,8 @@ spanktube:
     worker-delay-ms: ${ARCHIVE_WORKER_DELAY_MS:2000}
     yt-dlp-executable: ${YT_DLP_EXECUTABLE:yt-dlp}
     ffmpeg-executable: ${FFMPEG_EXECUTABLE:ffmpeg}
+    ffprobe-executable: ${FFPROBE_EXECUTABLE:ffprobe}
+    cleanup-cron: ${ARCHIVE_CLEANUP_CRON:0 */15 * * * *}
   upstream:
     url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}
   catalog:

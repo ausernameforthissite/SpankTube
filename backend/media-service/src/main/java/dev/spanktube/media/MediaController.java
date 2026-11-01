@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
@@ -39,16 +40,19 @@ class MediaController {
     private final WebClient youtubeClient;
     private final EgressProbe egressProbe;
     private final ArchivePlaybackService archivePlayback;
+    private final ThumbnailService thumbnailService;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
             DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
-            ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback) {
+            ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
+            ThumbnailService thumbnailService) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
         this.youtubeClient = youtubeClient;
         this.egressProbe = egressProbe.getIfAvailable();
         this.archivePlayback = archivePlayback;
+        this.thumbnailService = thumbnailService;
     }
 
     @GetMapping("/media/v/{videoId}/manifest.mpd")
@@ -97,36 +101,19 @@ class MediaController {
     }
 
     @GetMapping("/media/v/{videoId}/thumbnail")
-    Mono<ResponseEntity<byte[]>> videoThumbnail(@PathVariable String videoId) {
-        return upstreamClient.thumbnail(videoId).flatMap(this::image);
+    Mono<ResponseEntity<byte[]>> videoThumbnail(@PathVariable String videoId,
+            @RequestParam(defaultValue = "hq") String quality) {
+        return thumbnailService.videoThumbnail(videoId, quality);
     }
 
     @GetMapping("/media/channel/{channelId}/avatar")
     Mono<ResponseEntity<byte[]>> channelAvatar(@PathVariable String channelId) {
-        return upstreamClient.avatar(channelId).flatMap(this::image);
+        return upstreamClient.avatar(channelId).flatMap(thumbnailService::image);
     }
 
     @GetMapping("/media/playlist/{playlistId}/thumbnail")
     Mono<ResponseEntity<byte[]>> playlistThumbnail(@PathVariable String playlistId) {
-        return upstreamClient.playlistThumbnail(playlistId).flatMap(this::image);
-    }
-
-    private Mono<ResponseEntity<byte[]>> image(String url) {
-        if (url == null || url.isBlank()) {
-            return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Thumbnail not found"));
-        }
-        if (egressProbe != null && !egressProbe.isAvailable()) {
-            return Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "YouTube egress is unavailable: " + egressProbe.lastError()));
-        }
-        return youtubeClient.get()
-                .uri(MediaUrlValidator.thumbnailUrl(url))
-                .retrieve()
-                .toEntity(byte[].class)
-                .map(response -> ResponseEntity.status(response.getStatusCode())
-                        .contentType(response.getHeaders().getContentType())
-                        .cacheControl(CacheControl.maxAge(1, java.util.concurrent.TimeUnit.HOURS))
-                        .body(response.getBody()));
+        return upstreamClient.playlistThumbnail(playlistId).flatMap(thumbnailService::image);
     }
 
     private Mono<ResponseEntity<Flux<DataBuffer>>> proxy(URI uri, HttpHeaders incoming, String fallbackType) {

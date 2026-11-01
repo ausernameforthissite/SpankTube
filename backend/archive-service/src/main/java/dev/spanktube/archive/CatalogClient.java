@@ -31,6 +31,25 @@ class CatalogClient {
         }
     }
 
+    Optional<ArchiveModels.ExistingVideo> matchingVariant(String owner, String videoId,
+            ArchiveModels.DownloadOptions options) {
+        if (!options.subtitles() || !options.sponsorBlock()) {
+            return Optional.empty();
+        }
+        ArchiveModels.ExistingVideo video = existing(owner, videoId).orElse(null);
+        if (video == null) {
+            return Optional.empty();
+        }
+        if (options.archiveEquivalent()) {
+            return Optional.of(video);
+        }
+        if (options.videoFormatId() == null || options.audioFormatId() == null) {
+            return Optional.empty();
+        }
+        String expected = options.videoFormatId() + "+" + options.audioFormatId();
+        return expected.equals(video.quality()) ? Optional.of(video) : Optional.empty();
+    }
+
     boolean hasLink(String owner, String videoId) {
         try {
             client.get()

@@ -53,4 +53,20 @@ class YtDlpResponseParserTest {
                         "/media/playlist/PL123/thumbnail");
         assertThat(results.items()).allSatisfy(item -> assertThat(item.url()).doesNotContain("youtube.com"));
     }
+
+    @Test
+    void excludesAutomaticallyGeneratedSubtitles() {
+        String json = """
+                {"id":"abc12345678","formats":[{"format_id":"140","url":"https://rr1.googlevideo.com/v",
+                  "protocol":"https","acodec":"mp4a.40.2","vcodec":"none"}],
+                 "subtitles":{"en":[{"ext":"vtt","url":"https://www.youtube.com/api/timedtext/en"}]},
+                 "automatic_captions":{"de":[{"ext":"vtt","url":"https://www.youtube.com/api/timedtext/de"}]}}
+                """;
+
+        VideoDetails details = parser.parse(json);
+
+        assertThat(details.subtitles()).hasSize(1);
+        assertThat(details.subtitles().getFirst().language()).isEqualTo("en");
+        assertThat(details.subtitles().getFirst().label()).isEqualTo("en");
+    }
 }

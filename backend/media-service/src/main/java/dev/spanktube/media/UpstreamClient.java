@@ -20,14 +20,6 @@ class UpstreamClient {
                 .bodyToMono(UpstreamVideo.class);
     }
 
-    Mono<String> thumbnail(String videoId) {
-        return webClient.get()
-                .uri("/internal/v1/videos/{videoId}", videoId)
-                .retrieve()
-                .bodyToMono(java.util.Map.class)
-                .map(data -> stringValue(data.get("thumbnailUrl")));
-    }
-
     Mono<String> avatar(String channelId) {
         return webClient.get()
                 .uri("/internal/v1/channels/{channelId}", channelId)

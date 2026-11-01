@@ -189,6 +189,7 @@ services:
       ARCHIVE_ROOT: /archive
       ARCHIVE_MIN_DELAY_SECONDS: ${ARCHIVE_MIN_DELAY_SECONDS:-2}
       ARCHIVE_MAX_DELAY_SECONDS: ${ARCHIVE_MAX_DELAY_SECONDS:-5}
+      ARCHIVE_CLEANUP_CRON: ${ARCHIVE_CLEANUP_CRON:-0 */15 * * * *}
     volumes:
       - /mnt/spanktube:/archive
     ports:

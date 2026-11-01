@@ -30,5 +30,10 @@ create table if not exists user_views (
     primary key (user_id, video_id)
 );
 
+alter table videos add column if not exists width integer;
+alter table videos add column if not exists height integer;
+alter table videos add column if not exists video_codec text;
+alter table videos add column if not exists audio_codec text;
+
 create index if not exists user_views_lru_idx on user_views(user_id, last_accessed_at);
 create index if not exists user_views_video_idx on user_views(video_id);
