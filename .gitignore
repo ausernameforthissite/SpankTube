@@ -15,3 +15,10 @@ dist/
 *.tsbuildinfo
 
 deploy/rendered/
+
+.openclaw/
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
