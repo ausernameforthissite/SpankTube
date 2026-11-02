@@ -120,6 +120,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Playlist' }
+  /api/v1/metadata/logs:
+    get:
+      operationId: streamStage2MetadataLogs
+      parameters:
+        - name: session
+          in: query
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 80 }
+      responses:
+        '200':
+          description: Last ten metadata preparation log lines and heartbeat
+          content:
+            text/event-stream:
+              schema: { type: string }
   /api/v1/library/progress:
     get:
       operationId: getStage2WatchProgress
@@ -574,6 +588,8 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SearchItem' }
         nextCursor: { type: [string, 'null'] }
+        videoCount: { type: [integer, 'null'], format: int64 }
+        totalPages: { type: [integer, 'null'], format: int32 }
     Video:
       type: object
       required: [videoId, title, publishedAt, channelId, channelName, channelAvatarUrl, channelUrl, thumbnailUrl, manifestUrl, formats, subtitles, sponsorBlock]
@@ -661,6 +677,8 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SearchItem' }
         nextCursor: { type: [string, 'null'] }
+        videoCount: { type: [integer, 'null'], format: int64 }
+        totalPages: { type: [integer, 'null'], format: int32 }
     LibraryItem:
       type: object
       required: [videoId, title, durationSeconds, sizeBytes, sizeMB, downloadUrl, lastAccessedAt]

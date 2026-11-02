@@ -129,6 +129,24 @@ input[role="switch"]:checked::before { transform: translateX(18px); }
 .library-info { flex: 1; min-width: 0; }
 .filename { margin-top: 5px; color: #7f8b9e; font-size: 0.75rem; overflow-wrap: anywhere; }
 .error-inline { max-width: none; margin-top: 7px; }
+.channel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.channel-heading .channel-line { flex: 1; min-width: 0; margin-bottom: 0; }
+.channel-heading .avatar.large { flex: 0 0 72px; margin: 0; }
+.channel-title { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 4px; }
+.channel-title h2, .channel-title p { margin: 0; }
+.channel-archive { flex-shrink: 0; }
+.channel-tabs { display: flex; gap: 2px; margin-bottom: 4px; border-bottom: 1px solid #30394a; }
+.channel-tab { padding: 10px 16px; color: #9aa6ba; background: transparent; border-radius: 8px 8px 0 0; }
+.channel-tab.active { color: #e6edff; background: #273247; box-shadow: inset 0 -2px #9cb4ff; }
+.split-arrow-icon { font-size: 0.72rem; }
+.pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.pagination-arrow { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 8px; }
+.pagination-arrow svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.pagination-page { min-width: 38px; padding: 8px; }
+.pagination-page.current { color: #0d1120; background: #9cb4ff; }
+.pagination-status { min-width: 44px; color: #939cac; font-size: 0.85rem; text-align: center; }
+.metadata-loading { margin-bottom: 16px; }
+.metadata-loading .playback-log-popup { min-height: 120px; }
 @keyframes queue-glow {
   from { background: #303745; color: #d8deea; box-shadow: 0 0 0 0 #ffcc0000; }
   to { background: #ffd52e; color: #1a1600; box-shadow: 0 0 14px 3px #ffcc0059; }

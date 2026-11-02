@@ -180,7 +180,7 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
             String channelUrl = info.getUploaderUrl();
             return new PlaylistDetails(info.getId(), info.getName(), channelId(channelUrl), info.getUploaderName(),
                     bestImage(info.getUploaderAvatars()), handle(channelUrl), customPath(channelUrl), null,
-                    items, nextCursor, thumbnail);
+                    items, nextCursor, thumbnail, info.getStreamCount(), info.getRelatedItems().size());
         });
     }
 

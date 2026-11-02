@@ -29,6 +29,15 @@ class NewPipePageCodecTest {
     }
 
     @Test
+    void keepsContinuationCursorShort() {
+        String cursor = codec.encode(new Page("https://www.youtube.com/continuation", "id",
+                List.of("item"), Map.of("cookie", "value"), new byte[] { 1, 2, 3 }));
+
+        assertThat(cursor).hasSizeLessThan(64);
+        assertThat(codec.decode(cursor).getUrl()).isEqualTo("https://www.youtube.com/continuation");
+    }
+
+    @Test
     void treatsInitialCursorAsEmpty() {
         assertThat(codec.decode(null)).isNull();
         assertThat(codec.decode("0")).isNull();

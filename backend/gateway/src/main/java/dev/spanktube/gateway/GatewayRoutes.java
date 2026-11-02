@@ -33,7 +33,8 @@ class GatewayRoutes {
                         .uri(properties.catalogServiceUrl()))
                 .route("catalog-videos", route -> route.path("/api/v1/videos/**")
                         .uri(properties.catalogServiceUrl()))
-                .route("upstream-search", route -> route.path("/api/v1/search", "/api/v1/channels/**", "/api/v1/playlists/**")
+                .route("upstream-search", route -> route.path("/api/v1/search", "/api/v1/channels/**",
+                        "/api/v1/playlists/**", "/api/v1/metadata/logs")
                         .uri(properties.upstreamServiceUrl()))
                 .route("media-service", route -> route.path("/media/**")
                         .uri(properties.mediaServiceUrl()))

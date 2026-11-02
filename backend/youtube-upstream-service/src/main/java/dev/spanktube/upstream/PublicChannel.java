@@ -12,7 +12,9 @@ public record PublicChannel(
         Long subscriberCount,
         List<SearchItem> videos,
         List<SearchItem> playlists,
-        String nextCursor) {
+        String nextCursor,
+        Long videoCount,
+        Integer totalPages) {
 
     static PublicChannel from(ChannelDetails details) {
         String url = details.customPath() != null ? "/c/" + details.customPath()
@@ -20,6 +22,6 @@ public record PublicChannel(
                 : "/channel/" + details.channelId();
         return new PublicChannel(details.channelId(), details.title(), details.handle(), details.customPath(), url,
                 MediaLinks.thumbnail(details.avatarUrl(), "/media/channel/" + details.channelId() + "/avatar"),
-                details.subscriberCount(), details.videos(), details.playlists(), details.nextCursor());
+                details.subscriberCount(), details.videos(), details.playlists(), details.nextCursor(), null, null);
     }
 }

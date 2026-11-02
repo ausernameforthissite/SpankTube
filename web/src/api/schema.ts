@@ -132,6 +132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/metadata/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamStage2MetadataLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/progress": {
         parameters: {
             query?: never;
@@ -560,6 +576,10 @@ export interface components {
             videos?: components["schemas"]["SearchItem"][];
             playlists?: components["schemas"]["SearchItem"][];
             nextCursor?: string | null;
+            /** Format: int64 */
+            videoCount?: number | null;
+            /** Format: int32 */
+            totalPages?: number | null;
         };
         Video: {
             videoId: string;
@@ -636,6 +656,10 @@ export interface components {
             channel?: components["schemas"]["Channel"];
             items: components["schemas"]["SearchItem"][];
             nextCursor?: string | null;
+            /** Format: int64 */
+            videoCount?: number | null;
+            /** Format: int32 */
+            totalPages?: number | null;
         };
         LibraryItem: {
             videoId: string;
@@ -1074,6 +1098,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Playlist"];
+                };
+            };
+        };
+    };
+    streamStage2MetadataLogs: {
+        parameters: {
+            query: {
+                session: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Last ten metadata preparation log lines and heartbeat */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
         };

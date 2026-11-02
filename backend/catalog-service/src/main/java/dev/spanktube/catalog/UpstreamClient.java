@@ -19,9 +19,9 @@ class UpstreamClient {
         client = RestClient.builder().baseUrl(upstreamUrl).requestFactory(requests).build();
     }
 
-    Map<String, Object> video(String videoId) {
+    Map<String, Object> video(String videoId, String logSession) {
         return client.get()
-                .uri("/api/v1/videos/{videoId}", videoId)
+                .uri("/api/v1/videos/{videoId}?logSession={logSession}", videoId, logSession)
                 .retrieve()
                 .body(Map.class);
     }

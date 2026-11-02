@@ -13,5 +13,7 @@ public record PlaylistDetails(
         Long channelSubscriberCount,
         List<SearchItem> items,
         String nextCursor,
-        String thumbnailUrl) {
+        String thumbnailUrl,
+        Long videoCount,
+        Integer pageSize) {
 }

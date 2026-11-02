@@ -3,6 +3,7 @@ import shaka from "shaka-player/dist/shaka-player.compiled.js";
 import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
+import { Pagination } from "./Pagination";
 import { PlaybackLog } from "./PlaybackLog";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
@@ -22,6 +23,8 @@ type Channel = {
   avatarUrl: string;
   subscriberCount: number | null;
   nextCursor: string | null;
+  videoCount: number | null;
+  totalPages: number | null;
 };
 type Video = Omit<BaseVideo, "formats"> & {
   formats: VideoFormat[];
@@ -50,6 +53,8 @@ type Playlist = {
   items: SearchItem[];
   nextCursor: string | null;
   thumbnailUrl: string;
+  videoCount: number | null;
+  totalPages: number | null;
 };
 type LibraryItem = {
   videoId: string;
@@ -130,6 +135,11 @@ function parseTimecode(value: string | null): number | null {
   return Number.isSafeInteger(total) ? total : null;
 }
 
+function pageNumber(value: string | null): number {
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page >= 1 ? page : 1;
+}
+
 function formatMB(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(bytes >= 100_000_000 ? 0 : 1)} МБ`;
 }
@@ -198,7 +208,9 @@ export default function App() {
   const activeArchiveDurationRef = useRef<number | null>(null);
   const historySelectionRef = useRef(false);
   const [channel, setChannel] = useState<ChannelPage | null>(null);
+  const [channelTab, setChannelTab] = useState<"videos" | "playlists">("videos");
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
+  const pageCursors = useRef<Record<string, Record<number, string | null>>>({});
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryResponse | null>(null);
@@ -221,6 +233,14 @@ export default function App() {
   const authenticated = session !== null;
   const watchId = location.path === "/watch" ? location.query.get("v") : null;
   const requestedStart = watchId ? parseTimecode(location.query.get("t")) : null;
+  const currentPage = pageNumber(location.query.get("page"));
+  const metadataSupported = Boolean(watchId) || location.path === "/playlist"
+    || location.path.startsWith("/channel/") || location.path.startsWith("/c/") || location.path.startsWith("/@");
+  const metadataKey = watchId ? `video:${watchId}` : location.path === "/playlist"
+    ? `playlist:${location.query.get("list")}` : location.path;
+  const metadataSession = useMemo(() => `metadata-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    [location]);
+  useEffect(() => setChannelTab("videos"), [metadataKey]);
   const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [watchId, requestedStart]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
@@ -350,6 +370,8 @@ export default function App() {
 
   const playbackLogs = usePlaybackLogs(watchId, playbackSession,
     Boolean(session) && !controlsReady, apiFetch);
+  const metadataLogs = usePlaybackLogs(null, metadataSession,
+    Boolean(session) && !archiveFile && metadataSupported, apiFetch, "metadata");
 
   const notify = useCallback((message: string) => {
     document.getElementById("spanktube-toast")?.remove();
@@ -388,6 +410,27 @@ export default function App() {
     if (!preservePopup) setPopup(null);
     window.scrollTo(0, 0);
   }, []);
+
+  const rememberPage = useCallback((key: string, page: number, cursor: string | null, nextCursor: string | null) => {
+    const pages = { ...(pageCursors.current[key] || {}), [page]: cursor };
+    if (nextCursor) pages[page + 1] = nextCursor;
+    else delete pages[page + 1];
+    pageCursors.current = { ...pageCursors.current, [key]: pages };
+  }, []);
+
+  const canOpenPage = useCallback((page: number) => page === 1
+    || Boolean(pageCursors.current[metadataKey]?.[page]), [metadataKey]);
+
+  const openPage = useCallback((page: number) => {
+    if (!canOpenPage(page)) return;
+    const params = new URLSearchParams(location.query);
+    const cursor = page === 1 ? null : pageCursors.current[metadataKey]?.[page];
+    if (page === 1) params.delete("page");
+    else params.set("page", String(page));
+    if (cursor) params.set("cursor", cursor);
+    else params.delete("cursor");
+    navigate(`${location.path}?${params.toString()}`);
+  }, [location, metadataKey, canOpenPage, navigate]);
 
   useEffect(() => {
     const listener = () => setLocation(readLocation());
@@ -513,7 +556,7 @@ export default function App() {
     const load = async () => {
       if (path === "/watch") {
         const id = query.get("v") || "";
-        const youtubeRequest = apiFetch(`/api/v1/videos/${id}`);
+        const youtubeRequest = apiFetch(`/api/v1/videos/${id}?logSession=${encodeURIComponent(metadataSession)}`);
         try {
           const archiveResponse = await apiFetch(`/api/v1/videos/${id}/archive`);
           applyArchive(await archiveResponse.json() as ArchiveAvailability);
@@ -533,16 +576,24 @@ export default function App() {
         }
       } else if (path === "/playlist") {
         const id = query.get("list") || "";
-        const cursor = query.get("cursor");
-        const response = await apiFetch(`/api/v1/playlists/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
-        setPlaylist(await response.json());
+        const cursor = currentPage === 1 ? null : query.get("cursor");
+        const params = new URLSearchParams({ logSession: metadataSession });
+        if (cursor) params.set("cursor", cursor);
+        const response = await apiFetch(`/api/v1/playlists/${id}?${params.toString()}`);
+        const data = await response.json() as Playlist;
+        rememberPage(metadataKey, currentPage, cursor, data.nextCursor);
+        setPlaylist(data);
       } else if (path.startsWith("/channel/") || path.startsWith("/c/") || path.startsWith("/@")) {
         const id = path.startsWith("/channel/")
           ? path.substring("/channel/".length)
           : path.startsWith("/c/") ? path.substring(3) : path.substring(1);
-        const cursor = query.get("cursor");
-        const response = await apiFetch(`/api/v1/channels/${encodeURIComponent(id)}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
-        setChannel(await response.json());
+        const cursor = currentPage === 1 ? null : query.get("cursor");
+        const params = new URLSearchParams({ logSession: metadataSession });
+        if (cursor) params.set("cursor", cursor);
+        const response = await apiFetch(`/api/v1/channels/${encodeURIComponent(id)}?${params.toString()}`);
+        const data = await response.json() as ChannelPage;
+        rememberPage(metadataKey, currentPage, cursor, data.nextCursor);
+        setChannel(data);
       } else if (path === "/search") {
         const q = query.get("q") || "";
         const type = query.get("type") || "videos";
@@ -562,7 +613,8 @@ export default function App() {
       }
     };
     load().catch(showError).finally(() => setLoading(false));
-  }, [location, authenticated, apiFetch, loadLibrary, loadUsers, showError, applyArchive]);
+  }, [location, authenticated, apiFetch, loadLibrary, loadUsers, showError, applyArchive,
+    metadataSession, currentPage, metadataKey, rememberPage]);
 
   useEffect(() => {
     if (!watchId || !videoElement || !archiveChecked) return;
@@ -929,7 +981,7 @@ export default function App() {
           <button className="secondary" onClick={() => navigate("/jobs")}>Очередь</button>
           <button className="secondary split-arrow" aria-label="Показать очередь" onClick={event => togglePopup("queue", event.currentTarget)}>▼</button>
         </div>
-        <button className="secondary" onClick={event => togglePopup("settings", event.currentTarget)}>Настройки ▼</button>
+        <button className="secondary" onClick={event => togglePopup("settings", event.currentTarget)}>Настройки <span className="split-arrow-icon">▼</span></button>
         {session.role === "ADMIN" && <button className="secondary" onClick={() => navigate("/admin")}>Квоты</button>}
       </nav>
 
@@ -964,7 +1016,10 @@ export default function App() {
           {actions.length > 0 && <ul>{actions.map(action => <li key={action}>{action}</li>)}</ul>}
         </section>
       )}
-      {loading && <p className="muted">Загрузка…</p>}
+      {loading && !archiveFile && metadataSupported && location.path !== "/watch" && <div className="metadata-loading panel">
+        <PlaybackLog lines={metadataLogs} overlay={false} />
+      </div>}
+      {loading && !archiveFile && !metadataSupported && <p className="muted">Загрузка…</p>}
 
       {location.path === "/search" && <>
         <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} />
@@ -995,7 +1050,8 @@ export default function App() {
                 }} />
               {controlsReady && <div className="seek-gestures" aria-hidden="true"
                 onClick={togglePlayback} onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek} />}
-              {!controlsReady && <PlaybackLog lines={playbackLogs} />}
+              {!controlsReady && <PlaybackLog lines={loading && !archiveFile && metadataLogs.length > 0
+                ? metadataLogs : playbackLogs} />}
             </div>
             <div className="playback">
               <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !controlsReady}>
@@ -1005,7 +1061,7 @@ export default function App() {
                 {archiveFile
                   ? <button type="button" className="secondary" onClick={() => void downloadBlob(archiveFile.downloadUrl, archiveFile.filename)}>Скачать из архива</button>
                   : <button type="button" className="secondary" onClick={archive}>Архивировать</button>}
-                {archiveFile && <button type="button" className="secondary" onClick={event => void openHistory(event.currentTarget)}>История ▼</button>}
+                {archiveFile && <button type="button" className="secondary" onClick={event => void openHistory(event.currentTarget)}>История <span className="split-arrow-icon">▼</span></button>}
                 <div className="split-button">
                   <button type="button" className="secondary" onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
                   <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания" onClick={event => togglePopup("download", event.currentTarget)}>▼</button>
@@ -1046,22 +1102,31 @@ export default function App() {
           <h2>{playlist.title}</h2>
           <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать плейлист</button>
           <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} />
-          {playlist.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/playlist?list=${playlist.playlistId}&cursor=${encodeURIComponent(playlist.nextCursor!)}`)}>Следующая страница</button>}
+          <Pagination page={currentPage} totalPages={playlist.totalPages} hasNext={Boolean(playlist.nextCursor)}
+            loading={loading} canOpen={canOpenPage} onOpen={openPage} />
         </section>
       )}
 
       {(location.path.startsWith("/channel/") || location.path.startsWith("/c/") || location.path.startsWith("/@")) && channel && (
         <section className="panel metadata">
-          <div className="channel-line">
-            <img className="avatar large" src={channel.avatarUrl} alt="" />
-            <div><h2>{channel.title}</h2><p className="muted">{channel.subscriberCount == null ? "" : `${number.format(channel.subscriberCount)} подписчиков`}</p></div>
+          <div className="channel-heading">
+            <div className="channel-line">
+              <img className="avatar large" src={channel.avatarUrl} alt="" />
+              <div className="channel-title"><h2>{channel.title}</h2><p className="muted">{channel.subscriberCount == null ? "" : `${number.format(channel.subscriberCount)} подписчиков`}</p></div>
+            </div>
+            <button className="secondary channel-archive" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`)}>Архивировать канал</button>
           </div>
-          <button className="secondary" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`)}>Архивировать канал</button>
-          {channel.videos.length > 0 && <h3>Видео</h3>}
-          <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} />
-          {channel.nextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`${channel.url}?cursor=${encodeURIComponent(channel.nextCursor!)}`)}>Следующие видео</button>}
-          {channel.playlists.length > 0 && <h3>Плейлисты</h3>}
-          <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} />
+          <div className="channel-tabs" role="tablist" aria-label="Содержимое канала">
+            <button role="tab" className={channelTab === "videos" ? "channel-tab active" : "channel-tab"}
+              aria-selected={channelTab === "videos"} onClick={() => setChannelTab("videos")}>Видео</button>
+            <button role="tab" className={channelTab === "playlists" ? "channel-tab active" : "channel-tab"}
+              aria-selected={channelTab === "playlists"} onClick={() => setChannelTab("playlists")}>Плейлисты</button>
+          </div>
+          {channelTab === "videos" ? <>
+            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} />
+            <Pagination page={currentPage} totalPages={channel.totalPages} hasNext={Boolean(channel.nextCursor)}
+              loading={loading} canOpen={canOpenPage} onOpen={openPage} />
+          </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} />}
         </section>
       )}
 

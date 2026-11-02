@@ -120,7 +120,9 @@ class YtDlpResponseParser {
                 longValue(root, "subscriber_count"),
                 List.copyOf(items),
                 nextCursor,
-                thumbnail);
+                thumbnail,
+                longValue(root, "video_count") != null ? longValue(root, "video_count") : longValue(root, "playlist_count"),
+                20);
     }
 
     private static SearchItem searchItem(JsonNode entry) {

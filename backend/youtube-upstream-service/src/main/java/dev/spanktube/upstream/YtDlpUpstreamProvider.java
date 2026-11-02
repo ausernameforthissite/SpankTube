@@ -145,7 +145,8 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
         return new PlaylistDetails(playlist.playlistId(), playlist.title(), playlist.channelId(), playlist.channelName(),
                 playlist.channelAvatarUrl(), playlist.channelHandle(), playlist.channelCustomPath(),
                 playlist.channelSubscriberCount(), playlist.items(),
-                cursor == null ? null : nextCursor(playlist.items(), offset), playlist.thumbnailUrl());
+                cursor == null ? null : nextCursor(playlist.items(), offset), playlist.thumbnailUrl(),
+                playlist.videoCount(), playlist.pageSize());
     }
 
     private static String channelPath(String channelId) {

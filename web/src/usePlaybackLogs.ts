@@ -4,15 +4,15 @@ import type { ApiFetch } from "./types";
 export type PlaybackLogLine = { id: number; text: string };
 
 export function usePlaybackLogs(videoId: string | null, sessionId: string, active: boolean,
-  apiFetch: ApiFetch): PlaybackLogLine[] {
+  apiFetch: ApiFetch, kind: "playback" | "metadata" = "playback"): PlaybackLogLine[] {
   const [lines, setLines] = useState<PlaybackLogLine[]>([]);
 
   useEffect(() => {
     setLines([]);
-  }, [videoId, sessionId]);
+  }, [videoId, sessionId, kind]);
 
   useEffect(() => {
-    if (!videoId || !active) return;
+    if (!active || (kind === "playback" && !videoId)) return;
     let stopped = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let abort: AbortController | null = null;
@@ -21,7 +21,9 @@ export function usePlaybackLogs(videoId: string | null, sessionId: string, activ
     const listen = async () => {
       try {
         abort = new AbortController();
-        const response = await apiFetch(`/media/v/${videoId}/logs?session=${sessionId}`, { signal: abort.signal });
+        const endpoint = kind === "metadata" ? `/api/v1/metadata/logs?session=${sessionId}`
+          : `/media/v/${videoId}/logs?session=${sessionId}`;
+        const response = await apiFetch(endpoint, { signal: abort.signal });
         if (!response.body) throw new Error("SSE stream is unavailable");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -54,7 +56,7 @@ export function usePlaybackLogs(videoId: string | null, sessionId: string, activ
       if (retry) clearTimeout(retry);
       abort?.abort();
     };
-  }, [videoId, sessionId, active, apiFetch]);
+  }, [videoId, sessionId, active, apiFetch, kind]);
 
   return lines;
 }
