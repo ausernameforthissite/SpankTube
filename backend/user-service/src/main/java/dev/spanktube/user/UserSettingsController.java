@@ -28,7 +28,8 @@ class UserSettingsController {
     @PatchMapping("/api/v1/users/me/settings")
     @Transactional
     public Settings update(@AuthenticationPrincipal Jwt jwt, @RequestBody SettingsPatch patch) {
-        if (patch.autoplay() == null && patch.hideTechnicalDetails() == null && patch.preferBestQuality() == null) {
+        if (patch.autoplay() == null && patch.hideTechnicalDetails() == null && patch.preferBestQuality() == null
+                && patch.theme() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No settings to update");
         }
         String username = jwt.getSubject();
@@ -46,18 +47,26 @@ class UserSettingsController {
                     + "on conflict(username) do update set prefer_best_quality = excluded.prefer_best_quality",
                     username, patch.preferBestQuality());
         }
+        if (patch.theme() != null) {
+            if (!java.util.Set.of("system", "light", "dark").contains(patch.theme())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown theme");
+            }
+            jdbc.update("insert into user_settings(username, theme) values (?, ?) "
+                    + "on conflict(username) do update set theme = excluded.theme", username, patch.theme());
+        }
         return current(username);
     }
 
     private Settings current(String username) {
-        return jdbc.query("select autoplay, hide_technical_details, prefer_best_quality from user_settings where username = ?",
+        return jdbc.query("select autoplay, hide_technical_details, prefer_best_quality, theme from user_settings where username = ?",
                 rs -> rs.next() ? new Settings(rs.getBoolean("autoplay"), rs.getBoolean("hide_technical_details"),
-                        rs.getBoolean("prefer_best_quality")) : new Settings(true, false, true), username);
+                        rs.getBoolean("prefer_best_quality"), rs.getString("theme"))
+                        : new Settings(true, false, true, "system"), username);
     }
 
-    record Settings(boolean autoplay, boolean hideTechnicalDetails, boolean preferBestQuality) {
+    record Settings(boolean autoplay, boolean hideTechnicalDetails, boolean preferBestQuality, String theme) {
     }
 
-    record SettingsPatch(Boolean autoplay, Boolean hideTechnicalDetails, Boolean preferBestQuality) {
+    record SettingsPatch(Boolean autoplay, Boolean hideTechnicalDetails, Boolean preferBestQuality, String theme) {
     }
 }

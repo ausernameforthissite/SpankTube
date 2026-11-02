@@ -1,15 +1,19 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import shaka from "shaka-player/dist/shaka-player.compiled.js";
+import { AppHeader, type HeaderSearchType } from "./AppHeader";
+import { animalAvatar } from "./animalAvatar";
 import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
+import { LibraryView } from "./LibraryView";
 import { Pagination } from "./Pagination";
 import { PlaybackLog } from "./PlaybackLog";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
+import { UserMenu } from "./UserMenu";
 import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
-import type { ApiFetch, ArchiveAvailability, ArchiveVersion, QueueJob, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
+import type { ApiFetch, ArchiveAvailability, ArchiveVersion, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -45,6 +49,7 @@ type SearchItem = {
   videoCount: number | null;
 };
 type SearchResults = { items: SearchItem[]; nextCursor: string | null };
+type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
 type ChannelPage = Channel & { videos: SearchItem[]; playlists: SearchItem[] };
 type Playlist = {
   playlistId: string;
@@ -56,24 +61,6 @@ type Playlist = {
   videoCount: number | null;
   totalPages: number | null;
 };
-type LibraryItem = {
-  videoId: string;
-  title: string;
-  durationSeconds: number;
-  sizeBytes: number;
-  sizeMB: number;
-  downloadUrl: string;
-  lastAccessedAt: string;
-  thumbnailUrl: string;
-  width: number | null;
-  height: number | null;
-  videoCodec: string | null;
-  audioCodec: string | null;
-  audioBitrate: number | null;
-  filename: string;
-};
-type LibraryChannel = { channel: Channel; videos: LibraryItem[]; totalBytes: number };
-type LibraryResponse = { channels: LibraryChannel[]; usedBytes: number; quotaBytes: number; lruThresholdPercent: number };
 type UserQuota = {
   username: string;
   role: string;
@@ -82,7 +69,7 @@ type UserQuota = {
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
 };
-type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | null;
+type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | null;
 
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -140,10 +127,6 @@ function pageNumber(value: string | null): number {
   return Number.isSafeInteger(page) && page >= 1 ? page : 1;
 }
 
-function formatMB(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(bytes >= 100_000_000 ? 0 : 1)} МБ`;
-}
-
 function archiveFilename(job: QueueJob): string {
   const extension = job.options.videoFormatId === null && job.options.audioFormatId !== null ? "mp3" : "mkv";
   const resolution = job.videoCodec ? (job.height ? `${job.height}p` : "unknown") : "audio";
@@ -185,8 +168,36 @@ function archiveVideo(version: ArchiveVersion): Video {
   };
 }
 
+function youtubeVideoId(input: string): string | null {
+  const value = input.trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    const id = url.hostname === "youtu.be" ? url.pathname.slice(1) : url.searchParams.get("v");
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function videoSearchItem(video: Video): SearchItem {
+  return { kind: "video", id: video.videoId, title: video.title, url: `/watch?v=${video.videoId}`,
+    thumbnailUrl: video.thumbnailUrl || `/media/v/${video.videoId}/thumbnail`, channelName: video.channelName,
+    durationSeconds: video.durationSeconds ?? null, videoCount: null };
+}
+
 function readLocation() {
   return { path: window.location.pathname, query: new URLSearchParams(window.location.search) };
+}
+
+function auxiliaryNavigation(event: ReactMouseEvent<HTMLElement>) {
+  if (event.button !== 1) return;
+  const target = event.target as HTMLElement;
+  const url = target.closest("a[href]")?.getAttribute("href")
+    || target.closest<HTMLElement>("[data-nav-url]")?.dataset.navUrl;
+  if (!url) return;
+  event.preventDefault();
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export default function App() {
@@ -195,10 +206,15 @@ export default function App() {
   const refreshRef = useRef<Promise<string> | null>(null);
   const [username, setUsername] = useState("viewer");
   const [password, setPassword] = useState("");
+  const [registration, setRegistration] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
   const [location, setLocation] = useState(readLocation);
-  const [videoId, setVideoId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchType, setSearchType] = useState("videos");
+  const [searchType, setSearchType] = useState<HeaderSearchType>("all");
+  const [searchMessage, setSearchMessage] = useState<string | null>(null);
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
+  const [avatarVersion, setAvatarVersion] = useState(0);
+  const [invite, setInvite] = useState<{ code: string; expiresAt: string; usedBy: string | null } | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
   const [archiveFile, setArchiveFile] = useState<{ downloadUrl: string; filename: string } | null>(null);
   const [archiveChecked, setArchiveChecked] = useState(false);
@@ -208,39 +224,44 @@ export default function App() {
   const activeArchiveDurationRef = useRef<number | null>(null);
   const historySelectionRef = useRef(false);
   const [channel, setChannel] = useState<ChannelPage | null>(null);
-  const [channelTab, setChannelTab] = useState<"videos" | "playlists">("videos");
+  const [channelTab, setChannelTab] = useState<"videos" | "playlists">(
+    location.query.get("tab") === "playlists" ? "playlists" : "videos");
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const pageCursors = useRef<Record<string, Record<number, string | null>>>({});
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryResponse | null>(null);
+  const [archiveLocations, setArchiveLocations] = useState<Record<string, LibraryLocation>>({});
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
-  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false, preferBestQuality: true });
+  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false, preferBestQuality: true, theme: "system" });
   const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
   const watchProgressRef = useRef(watchProgress);
   watchProgressRef.current = watchProgress;
   const progressRequestRef = useRef<Promise<void> | null>(null);
   const autoplayRef = useRef(settings.autoplay);
   autoplayRef.current = settings.autoplay;
-  const preferBestQualityRef = useRef(settings.preferBestQuality);
-  preferBestQualityRef.current = settings.preferBestQuality;
   const [sortMode, setSortMode] = useState("size:desc");
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [mediaReady, setMediaReady] = useState(false);
+  const [theater, setTheater] = useState(false);
+  const [qualityTracks, setQualityTracks] = useState<QualityTrack[]>([]);
+  const [selectedQuality, setSelectedQuality] = useState<"best" | "auto" | number>("best");
+  const playerRef = useRef<shaka.Player | null>(null);
   const controlsReady = playerReady || mediaReady;
   const authenticated = session !== null;
   const watchId = location.path === "/watch" ? location.query.get("v") : null;
   const requestedStart = watchId ? parseTimecode(location.query.get("t")) : null;
   const currentPage = pageNumber(location.query.get("page"));
+  const libraryScope = location.path === "/library" ? location.query.get("scope") || "own" : "own";
   const metadataSupported = Boolean(watchId) || location.path === "/playlist"
     || location.path.startsWith("/channel/") || location.path.startsWith("/c/") || location.path.startsWith("/@");
   const metadataKey = watchId ? `video:${watchId}` : location.path === "/playlist"
     ? `playlist:${location.query.get("list")}` : location.path;
   const metadataSession = useMemo(() => `metadata-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [location]);
-  useEffect(() => setChannelTab("videos"), [metadataKey]);
+  useEffect(() => setChannelTab(location.query.get("tab") === "playlists" ? "playlists" : "videos"), [metadataKey]);
   const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [watchId, requestedStart]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
@@ -259,6 +280,11 @@ export default function App() {
   const playerDestroyRef = useRef<Promise<void> | null>(null);
   const lastTouchTapRef = useRef<{ timeStamp: number; x: number; y: number } | null>(null);
   const lastTouchSeekRef = useRef(0);
+  const [controlsOverlayVisible, setControlsOverlayVisible] = useState(false);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [seekEffect, setSeekEffect] = useState<{ direction: "left" | "right"; position: number;
+    duration: number; id: number; leaving: boolean } | null>(null);
+  const seekEffectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const saveSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
@@ -411,6 +437,13 @@ export default function App() {
     window.scrollTo(0, 0);
   }, []);
 
+  const selectChannelTab = useCallback((tab: "videos" | "playlists") => {
+    setChannelTab(tab);
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", tab);
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  }, []);
+
   const rememberPage = useCallback((key: string, page: number, cursor: string | null, nextCursor: string | null) => {
     const pages = { ...(pageCursors.current[key] || {}), [page]: cursor };
     if (nextCursor) pages[page + 1] = nextCursor;
@@ -438,11 +471,19 @@ export default function App() {
     return () => window.removeEventListener("popstate", listener);
   }, []);
 
+  const openArchivedVideo = useCallback((videoId: string) => {
+    const location = archiveLocations[videoId];
+    if (!location) return;
+    const params = new URLSearchParams({ scope: "global", channel: location.channelId,
+      playlist: location.playlistId || "none", video: videoId });
+    navigate(`/library?${params.toString()}`);
+  }, [archiveLocations, navigate]);
+
   const loadLibrary = useCallback(async () => {
     const [sort, direction] = sortMode.split(":");
-    const response = await apiFetch(`/api/v1/library?sort=${sort}&direction=${direction}`);
+    const response = await apiFetch(`/api/v1/library?sort=${sort}&direction=${direction}&scope=${encodeURIComponent(libraryScope)}`);
     setLibrary(await response.json());
-  }, [apiFetch, sortMode]);
+  }, [apiFetch, sortMode, libraryScope]);
 
   const loadUsers = useCallback(async () => {
     const response = await apiFetch("/api/v1/admin/users");
@@ -454,18 +495,37 @@ export default function App() {
   useEffect(() => {
     if (!session) {
       setWatchProgress({});
+      setArchiveLocations({});
       progressRequestRef.current = null;
       return;
     }
     progressRequestRef.current = Promise.all([
       apiFetch("/api/v1/users/me/settings"),
       apiFetch("/api/v1/library/progress"),
-    ]).then(async ([settingsResponse, progressResponse]) => {
+      apiFetch("/api/v1/library/locations?scope=global"),
+    ]).then(async ([settingsResponse, progressResponse, locationsResponse]) => {
       setSettings(await settingsResponse.json());
       const entries = await progressResponse.json() as WatchProgress[];
       setWatchProgress(Object.fromEntries(entries.map(entry => [entry.videoId, entry])));
+      const locations = await locationsResponse.json() as LibraryLocation[];
+      const map: Record<string, LibraryLocation> = {};
+      for (const location of locations) {
+        if (!map[location.videoId]) map[location.videoId] = location;
+      }
+      setArchiveLocations(map);
     }).catch(showError);
   }, [session, apiFetch, showError]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => {
+      document.documentElement.dataset.theme = settings.theme === "system"
+        ? media.matches ? "light" : "dark" : settings.theme;
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [settings.theme]);
 
   const updateSettings = async (patch: Partial<UserSettings>) => {
     const previous = settings;
@@ -475,6 +535,57 @@ export default function App() {
       setSettings(await response.json());
     } catch (reason) {
       setSettings(previous);
+      showError(reason);
+    }
+  };
+
+  const avatarUrl = avatarObjectUrl || animalAvatar(session?.username || "guest");
+
+  useEffect(() => {
+    if (!session) {
+      setAvatarObjectUrl(null);
+      return;
+    }
+    let cancelled = false;
+    apiFetch("/api/v1/users/me/avatar").then(async response => {
+      const blob = await response.blob();
+      if (cancelled) return;
+      setAvatarObjectUrl(previous => {
+        if (previous) URL.revokeObjectURL(previous);
+        return URL.createObjectURL(blob);
+      });
+    }).catch(() => setAvatarObjectUrl(null));
+    return () => {
+      cancelled = true;
+      setAvatarObjectUrl(previous => {
+        if (previous) URL.revokeObjectURL(previous);
+        return null;
+      });
+    };
+  }, [session, avatarVersion, apiFetch]);
+
+  const uploadAvatar = async (file: File) => {
+    setError(null);
+    try {
+      if (file.size > 200 * 1024) throw new RequestError("Аватар должен быть не больше 200 КиБ");
+      const bitmap = await createImageBitmap(file);
+      if (bitmap.width > 256 || bitmap.height > 256) throw new RequestError("Аватар должен быть не больше 256×256");
+      bitmap.close();
+      await apiFetch("/api/v1/users/me/avatar", {
+        method: "PUT", headers: { "Content-Type": file.type }, body: file,
+      });
+      setAvatarVersion(current => current + 1);
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
+  const generateInvite = async () => {
+    setError(null);
+    try {
+      const response = await apiFetch("/api/v1/invites", { method: "POST" });
+      setInvite(await response.json());
+    } catch (reason) {
       showError(reason);
     }
   };
@@ -595,18 +706,58 @@ export default function App() {
         rememberPage(metadataKey, currentPage, cursor, data.nextCursor);
         setChannel(data);
       } else if (path === "/search") {
-        const q = query.get("q") || "";
-        const type = query.get("type") || "videos";
+        const q = (query.get("q") || "").trim();
+        const type = (query.get("type") || "all") as HeaderSearchType;
         const cursor = query.get("cursor");
         setSearchQuery(q);
         setSearchType(type);
+        setSearchNextCursor(null);
         if (q) {
-          const response = await apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=${type}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-          const data = await response.json() as SearchResults;
-          setResults(data.items);
-          setSearchNextCursor(data.nextCursor);
+          setSearchMessage(type === "archive" ? "Поиск в вашем архиве…" : "Поиск по видео, каналам и плейлистам…");
+          if (type === "archive") {
+            const response = await apiFetch("/api/v1/library?scope=own");
+            const archive = await response.json() as LibraryResponse;
+            const normalized = q.toLocaleLowerCase();
+            const items = archive.channels.flatMap(group => group.videos)
+              .filter(item => item.title.toLocaleLowerCase().includes(normalized))
+              .map(item => ({ kind: "video" as const, id: item.videoId, title: item.title,
+                url: `/watch?v=${item.videoId}`, thumbnailUrl: item.thumbnailUrl, channelName: null,
+                durationSeconds: item.durationSeconds, videoCount: null }));
+            setResults(items);
+            setSearchMessage(`В архиве найдено: ${items.length}`);
+          } else if (type === "all") {
+            const id = youtubeVideoId(q);
+            const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+            const [videosResult, channelsResult, playlistsResult, directResult] = await Promise.allSettled([
+              apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=videos${suffix}`),
+              apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=channels${suffix}`),
+              apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=playlists${suffix}`),
+              id ? apiFetch(`/api/v1/videos/${id}`).catch(() => null) : Promise.resolve(null),
+            ]);
+            const readItems = async (result: PromiseSettledResult<Response>) => {
+              if (result.status !== "fulfilled") return { items: [] as SearchItem[], nextCursor: null };
+              const data = await result.value.json() as SearchResults;
+              return { items: data.items, nextCursor: data.nextCursor };
+            };
+            const [videoData, channelData, playlistData] = await Promise.all([
+              readItems(videosResult), readItems(channelsResult), readItems(playlistsResult),
+            ]);
+            const direct = directResult.status === "fulfilled" && directResult.value
+              ? videoSearchItem(await directResult.value.json() as Video) : null;
+            const merged = [...direct ? [direct] : [], ...videoData.items, ...channelData.items, ...playlistData.items];
+            const unique = Array.from(new Map(merged.map(item => [`${item.kind}:${item.id}`, item])).values());
+            setResults(unique);
+            setSearchNextCursor(videoData.nextCursor);
+            setSearchMessage(`Найдено: ${unique.length}`);
+          } else {
+            const response = await apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=${type}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+            const data = await response.json() as SearchResults;
+            setResults(data.items);
+            setSearchNextCursor(data.nextCursor);
+            setSearchMessage(`Найдено: ${data.items.length}`);
+          }
         }
-      } else if (path === "/library") {
+      } else if (path === "/library" || path === "/") {
         await loadLibrary();
       } else if (path === "/admin") {
         await loadUsers();
@@ -615,6 +766,13 @@ export default function App() {
     load().catch(showError).finally(() => setLoading(false));
   }, [location, authenticated, apiFetch, loadLibrary, loadUsers, showError, applyArchive,
     metadataSession, currentPage, metadataKey, rememberPage]);
+
+  useEffect(() => {
+    setTheater(false);
+    setSelectedQuality(settings.preferBestQuality ? "best" : "auto");
+    setQualityTracks([]);
+    playerRef.current = null;
+  }, [watchId]);
 
   useEffect(() => {
     if (!watchId || !videoElement || !archiveChecked) return;
@@ -632,6 +790,7 @@ export default function App() {
         await previousDestroy;
       }
       player = new shaka.Player();
+      playerRef.current = player;
       await player.attach(videoElement);
       player.configure("streaming.retryParameters.timeout", 120_000);
       player.configure("streaming.retryParameters.connectionTimeout", 60_000);
@@ -665,18 +824,15 @@ export default function App() {
       } else if (resume && resume.positionSeconds > 0 && resume.positionSeconds < videoElement.duration - 1) {
         videoElement.currentTime = resume.positionSeconds;
       }
-      player.configure("abr.enabled", !preferBestQualityRef.current);
-      if (preferBestQualityRef.current) {
-        const tracks = player.getVariantTracks();
-        if (tracks.length > 0) {
-          const best = tracks.reduce((current, candidate) => {
-            const candidateHeight = candidate.height || 0;
-            const currentHeight = current.height || 0;
-            return candidateHeight > currentHeight
-              || candidateHeight === currentHeight && candidate.bandwidth > current.bandwidth ? candidate : current;
-          });
-          player.selectVariantTrack(best, true);
-        }
+      player.configure("abr.enabled", selectedQuality === "auto");
+      const tracks = player.getVariantTracks().filter(track => (track.height || 0) > 0)
+        .sort((left, right) => (right.height || 0) - (left.height || 0) || right.bandwidth - left.bandwidth);
+      setQualityTracks(tracks);
+      if (selectedQuality === "best" && tracks.length > 0) {
+        player.selectVariantTrack(tracks[0], true);
+      } else if (typeof selectedQuality === "number") {
+        const selected = tracks.find(track => track.id === selectedQuality);
+        if (selected) player.selectVariantTrack(selected, true);
       }
       setPlayerReady(true);
       setPlaybackStatus("Готово к воспроизведению");
@@ -697,6 +853,7 @@ export default function App() {
       disposed = true;
       setPlayerReady(false);
       if (player) playerDestroyRef.current = player.destroy();
+      playerRef.current = null;
     };
   }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion, requestedStart]);
 
@@ -729,10 +886,10 @@ export default function App() {
     event.preventDefault();
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/auth/${registration ? "register" : "login"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(registration ? { invite: inviteCode, username, password } : { username, password }),
       });
       if (!response.ok) throw await responseError(response);
       acceptTokens((await response.json()) as TokenPair, username);
@@ -740,11 +897,6 @@ export default function App() {
     } catch (reason) {
       showError(reason);
     }
-  };
-
-  const watchVideo = (event: FormEvent) => {
-    event.preventDefault();
-    navigate(`/watch?v=${encodeURIComponent(videoId)}`);
   };
 
   const search = (event: FormEvent) => {
@@ -874,6 +1026,20 @@ export default function App() {
     setPopup(null);
   };
 
+  const playlistBack = () => {
+    if (!playlist) return;
+    const from = location.query.get("from");
+    if (from?.startsWith("/")) {
+      const target = new URL(from, window.location.origin);
+      if (target.pathname.startsWith("/channel/") || target.pathname.startsWith("/c/") || target.pathname.startsWith("/@")) {
+        target.searchParams.set("tab", "playlists");
+        navigate(`${target.pathname}?${target.searchParams.toString()}`);
+        return;
+      }
+    }
+    navigate(`${playlist.channel.url}?tab=playlists`);
+  };
+
   const togglePlayback = async () => {
     if (!videoElement || !controlsReady) return;
     setError(null);
@@ -885,12 +1051,55 @@ export default function App() {
     }
   };
 
+  const selectQuality = (value: string) => {
+    const player = playerRef.current;
+    if (!player) return;
+    if (value === "auto") {
+      setSelectedQuality("auto");
+      player.configure("abr.enabled", true);
+      return;
+    }
+    player.configure("abr.enabled", false);
+    if (value === "best") {
+      setSelectedQuality("best");
+      if (qualityTracks.length > 0) player.selectVariantTrack(qualityTracks[0], true);
+      return;
+    }
+    const id = Number(value);
+    const track = qualityTracks.find(candidate => candidate.id === id);
+    if (track) {
+      setSelectedQuality(id);
+      player.selectVariantTrack(track, true);
+    }
+  };
+
+  const revealNativeControls = useCallback(() => {
+    setControlsOverlayVisible(current => !current);
+  }, []);
+
+  const showSeekEffect = useCallback((offset: number) => {
+    if (!videoElement) return;
+    if (seekEffectTimer.current) clearTimeout(seekEffectTimer.current);
+    setSeekEffect({ direction: offset < 0 ? "left" : "right", position: videoElement.currentTime,
+      duration: videoElement.duration, id: performance.now(), leaving: false });
+    seekEffectTimer.current = setTimeout(() => {
+      setSeekEffect(current => current ? { ...current, leaving: true } : null);
+      seekEffectTimer.current = setTimeout(() => setSeekEffect(null), 300);
+    }, 700);
+  }, [videoElement]);
+
+  useEffect(() => () => {
+    if (seekEffectTimer.current) clearTimeout(seekEffectTimer.current);
+  }, []);
+
   const seekFromPointer = useCallback((clientX: number) => {
     if (!videoElement || !controlsReady || !Number.isFinite(videoElement.duration)) return;
     const bounds = videoElement.getBoundingClientRect();
     const offset = clientX < bounds.left + bounds.width / 2 ? -10 : 10;
     videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + offset));
-  }, [videoElement, controlsReady]);
+    setPlaybackPosition(videoElement.currentTime);
+    showSeekEffect(offset);
+  }, [videoElement, controlsReady, showSeekEffect]);
 
   const doubleClickSeek = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -925,6 +1134,15 @@ export default function App() {
     }
   }, [apiFetch, showError]);
 
+  const clearCompleted = useCallback(async () => {
+    setError(null);
+    try {
+      await apiFetch("/api/v1/archive/jobs", { method: "DELETE" });
+    } catch (reason) {
+      showError(reason);
+    }
+  }, [apiFetch, showError]);
+
   const remove = async (item: LibraryItem) => {
     if (!window.confirm(`Удалить «${item.title}» из своей библиотеки?`)) return;
     try {
@@ -953,14 +1171,19 @@ export default function App() {
 
   if (!session) {
     return (
-      <main>
-        <header><h1>SpankTube</h1><p>Вход в личный прокси YouTube</p></header>
+      <main onAuxClickCapture={auxiliaryNavigation}>
+        <header><h1>SpankTube</h1><p>{registration ? "Регистрация по инвайту" : "Вход в личный прокси YouTube"}</p></header>
         <section className="panel auth">
           <form onSubmit={login}>
+            {registration && <input value={inviteCode} onChange={event => setInviteCode(event.target.value.trim())}
+              placeholder="Код приглашения" aria-label="Код приглашения" required />}
             <input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" aria-label="Логин" required />
-            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder="Пароль" aria-label="Пароль" required />
-            <button type="submit">Войти</button>
+            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={registration ? "new-password" : "current-password"} placeholder="Пароль" aria-label="Пароль" required />
+            <button type="submit">{registration ? "Зарегистрироваться" : "Войти"}</button>
           </form>
+          <button className="link" onClick={() => { setRegistration(current => !current); setError(null); }}>
+            {registration ? "Вернуться ко входу" : "Регистрация по инвайту"}
+          </button>
         </section>
         {error && <section className="error" role="alert"><strong>{error}</strong></section>}
       </main>
@@ -968,45 +1191,19 @@ export default function App() {
   }
 
   return (
-    <main>
-      <header className="topline">
-        <div><h1>SpankTube</h1><p>Просмотр, поиск и архив YouTube</p></div>
-        <div className="userbox">{session.username} ({session.role}) <button className="secondary" onClick={() => saveSession(null)}>Выйти</button></div>
-      </header>
-      <nav className="panel nav">
-        <button className="secondary" onClick={() => navigate("/")}>Видео</button>
-        <button className="secondary" onClick={() => navigate("/search")}>Поиск</button>
-        <button className="secondary" onClick={() => navigate("/library")}>Библиотека</button>
-        <div className="split-button" ref={queueButtonRef}>
-          <button className="secondary" onClick={() => navigate("/jobs")}>Очередь</button>
-          <button className="secondary split-arrow" aria-label="Показать очередь" onClick={event => togglePopup("queue", event.currentTarget)}>▼</button>
-        </div>
-        <button className="secondary" onClick={event => togglePopup("settings", event.currentTarget)}>Настройки <span className="split-arrow-icon">▼</span></button>
-        {session.role === "ADMIN" && <button className="secondary" onClick={() => navigate("/admin")}>Квоты</button>}
-      </nav>
+    <main onAuxClickCapture={auxiliaryNavigation}>
+      <AppHeader searchQuery={searchQuery} searchType={searchType} onQueryChange={setSearchQuery}
+        onTypeChange={setSearchType} onSearch={search} onNavigate={navigate}
+        onQueue={anchor => togglePopup("queue", anchor)} onQueuePage={() => navigate("/jobs")}
+        onUser={anchor => togglePopup("user", anchor)} avatarUrl={avatarUrl} queueButtonRef={queueButtonRef} />
 
-      {location.path === "/" && (
-        <section className="panel">
-          <form className="video-search" onSubmit={watchVideo}>
-            <input value={videoId} onChange={event => setVideoId(event.target.value.trim())} placeholder="YouTube videoId (11 символов)" pattern="[A-Za-z0-9_-]{11}" aria-label="YouTube videoId" required />
-            <button type="submit" disabled={loading}>Смотреть</button>
-          </form>
-        </section>
-      )}
-
-      {location.path !== "/watch" && location.path !== "/playlist" && (
-        <section className="panel">
-          <form className="video-search" onSubmit={search}>
-            <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Поиск на YouTube" aria-label="Поиск на YouTube" />
-            <select value={searchType} onChange={event => setSearchType(event.target.value)} aria-label="Тип поиска">
-              <option value="videos">Видео</option>
-              <option value="channels">Каналы</option>
-              <option value="playlists">Плейлисты</option>
-            </select>
-            <button type="submit" disabled={loading}>Найти</button>
-          </form>
-        </section>
-      )}
+      {location.path === "/" && library && <>
+        <h2>Рекомендации из архива</h2>
+        <LibraryView library={library} query={new URLSearchParams()} role={session.role}
+          navigate={navigate} apiFetch={apiFetch} sortMode={sortMode} onSortModeChange={setSortMode}
+          onDownload={item => void downloadBlob(item.downloadUrl, item.filename)} onRemove={remove}
+          hideTechnicalDetails={settings.hideTechnicalDetails} progressMap={watchProgress} />
+      </>}
 
       {error && (
         <section className="error" role="alert">
@@ -1022,17 +1219,22 @@ export default function App() {
       {loading && !archiveFile && !metadataSupported && <p className="muted">Загрузка…</p>}
 
       {location.path === "/search" && <>
-        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} />
+        {searchMessage && <p className="muted" role="status">{searchMessage}</p>}
+        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
         {searchNextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/search?q=${encodeURIComponent(searchQuery)}&type=${searchType}&cursor=${encodeURIComponent(searchNextCursor)}`)}>Следующая страница</button>}
       </>}
 
       {watchId && (
         <article>
-          <section className="player panel">
-            <div className="video-frame">
+          <section className={theater ? "player panel theater-panel" : "player panel"}>
+            <div className={theater ? "video-frame theater" : "video-frame"}>
               <video ref={setVideoElement} controls={controlsReady} playsInline
                 aria-label="Видеоплеер. Двойной клик слева — на 10 секунд назад, справа — вперёд"
-                onLoadedMetadata={syncMediaReady}
+                onLoadedMetadata={() => {
+                  syncMediaReady();
+                  setPlaybackPosition(videoElement?.currentTime || 0);
+                }}
+                onTimeUpdate={event => setPlaybackPosition(event.currentTarget.currentTime)}
                 onCanPlay={() => {
                   syncMediaReady();
                   setPlaybackStatus("Готово к воспроизведению");
@@ -1049,13 +1251,47 @@ export default function App() {
                   void reportProgress();
                 }} />
               {controlsReady && <div className="seek-gestures" aria-hidden="true"
-                onClick={togglePlayback} onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek} />}
+                onClick={event => { if (event.detail === 1) revealNativeControls(); }}
+                onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek} />}
+              {seekEffect && <div key={seekEffect.id} className={`seek-effect ${seekEffect.direction}${seekEffect.leaving ? " leaving" : ""}`} aria-hidden="true">
+                <div className="seek-effect-circle" />
+                <div className="seek-effect-arrows">{[0, 1, 2].map(index => <span key={index} style={{ animationDelay: `${index * 0.15}s` }}>
+                  {seekEffect.direction === "left" ? "◀" : "▶"}
+                </span>)}</div>
+                <div className="seek-effect-label">10 секунд</div>
+                <div className="seek-effect-time">{formatDuration(seekEffect.position)} / {formatDuration(seekEffect.duration)}</div>
+              </div>}
+              {controlsOverlayVisible && controlsReady && <div className="controls-overlay"
+                onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
+                <button className="secondary icon-button" aria-label={videoElement?.paused === false ? "Пауза" : "Играть"}
+                  onClick={togglePlayback}>{videoElement?.paused === false ? "⏸" : "▶"}</button>
+                <input type="range" min={0} max={videoElement && Number.isFinite(videoElement.duration) ? videoElement.duration : 0}
+                  step={0.1} value={playbackPosition} aria-label="Позиция видео"
+                  onChange={event => {
+                    if (videoElement) videoElement.currentTime = Number(event.target.value);
+                    setPlaybackPosition(Number(event.target.value));
+                  }} />
+                <span className="controls-overlay-time">{formatDuration(Math.floor(playbackPosition))} / {formatDuration(Math.floor(videoElement?.duration || 0))}</span>
+              </div>}
               {!controlsReady && <PlaybackLog lines={loading && !archiveFile && metadataLogs.length > 0
                 ? metadataLogs : playbackLogs} />}
             </div>
             <div className="playback">
               <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !controlsReady}>
                 {videoElement?.paused === false ? "Пауза" : "Играть"}
+              </button>
+              {playerReady && qualityTracks.length > 0 && <select className="quality-select" aria-label="Качество видео"
+                value={selectedQuality} onChange={event => selectQuality(event.target.value)}>
+                <option value="best">Лучшее</option><option value="auto">Авто</option>
+                {qualityTracks.map(track => <option key={track.id} value={track.id}>
+                  {track.height}p · {Math.round(track.bandwidth / 1000)} kbps
+                </option>)}
+              </select>}
+              <button type="button" className="secondary icon-button" aria-label={theater ? "Выйти из театрального режима" : "Театральный режим"}
+                title={theater ? "Обычный размер" : "На всю ширину экрана"} onClick={() => setTheater(current => !current)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true">{theater
+                  ? <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+                  : <path d="M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5" />}</svg>
               </button>
               {video && <>
                 {archiveFile
@@ -1078,7 +1314,7 @@ export default function App() {
           {video && <section className="panel metadata">
             <div className="channel-line">
               {video.channelAvatarUrl && <img className="avatar" src={video.channelAvatarUrl} alt="" />}
-              <button className="link" onClick={() => navigate(video.channelUrl)}>{video.channelName}</button>
+              <button className="link" data-nav-url={video.channelUrl} onClick={() => navigate(video.channelUrl)}>{video.channelName}</button>
             </div>
             <h2>{video.title}</h2>
             <p className="stats">Публикация: {publicationDate(video.publishedAt)} · {formatDuration(video.durationSeconds)} · {video.viewCount == null ? "—" : `${number.format(video.viewCount)} просмотров`} · {video.likeCount == null ? "—" : `${number.format(video.likeCount)} лайков`}{video.dislikeCountEstimate == null ? "" : ` · ≈${number.format(video.dislikeCountEstimate)} дизлайков`}</p>
@@ -1095,13 +1331,17 @@ export default function App() {
 
       {location.path === "/playlist" && playlist && (
         <section className="panel metadata">
-          <div className="channel-line">
+          <div className="playlist-channel-line">
+            <button className="secondary icon-button" aria-label="Назад к плейлистам канала" title="Назад" onClick={playlistBack}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
             {playlist.channel.avatarUrl && <img className="avatar" src={playlist.channel.avatarUrl} alt="" />}
-            <button className="link" onClick={() => navigate(playlist.channel.url)}>{playlist.channel.title}</button>
+            <button className="link" data-nav-url={playlist.channel.url} onClick={() => navigate(playlist.channel.url)}>{playlist.channel.title}</button>
           </div>
-          <h2>{playlist.title}</h2>
-          <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать плейлист</button>
-          <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} />
+          <div className="playlist-heading"><h2>{playlist.title}</h2>
+            <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать</button>
+          </div>
+          <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
           <Pagination page={currentPage} totalPages={playlist.totalPages} hasNext={Boolean(playlist.nextCursor)}
             loading={loading} canOpen={canOpenPage} onOpen={openPage} />
         </section>
@@ -1118,48 +1358,22 @@ export default function App() {
           </div>
           <div className="channel-tabs" role="tablist" aria-label="Содержимое канала">
             <button role="tab" className={channelTab === "videos" ? "channel-tab active" : "channel-tab"}
-              aria-selected={channelTab === "videos"} onClick={() => setChannelTab("videos")}>Видео</button>
+              aria-selected={channelTab === "videos"} onClick={() => selectChannelTab("videos")}>Видео</button>
             <button role="tab" className={channelTab === "playlists" ? "channel-tab active" : "channel-tab"}
-              aria-selected={channelTab === "playlists"} onClick={() => setChannelTab("playlists")}>Плейлисты</button>
+              aria-selected={channelTab === "playlists"} onClick={() => selectChannelTab("playlists")}>Плейлисты</button>
           </div>
           {channelTab === "videos" ? <>
-            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} />
+            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
             <Pagination page={currentPage} totalPages={channel.totalPages} hasNext={Boolean(channel.nextCursor)}
               loading={loading} canOpen={canOpenPage} onOpen={openPage} />
-          </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} />}
+          </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />}
         </section>
       )}
 
-      {location.path === "/library" && library && (
-        <section>
-          <div className="panel stats">Использовано {formatGB(library.usedBytes)} из {formatGB(library.quotaBytes)} · LRU при {library.lruThresholdPercent}%</div>
-          <label className="panel">Сортировка: <select value={sortMode} onChange={event => setSortMode(event.target.value)}>
-            <option value="size:desc">Сначала большие</option><option value="size:asc">Сначала маленькие</option><option value="duration:desc">По длительности</option><option value="title:asc">По названию</option>
-          </select></label>
-          {library.channels.map(group => (
-            <section className="panel metadata" key={group.channel.channelId}>
-              <div className="channel-line">
-                {group.channel.avatarUrl && <img className="avatar" src={group.channel.avatarUrl} alt="" />}
-                <button className="link" onClick={() => navigate(group.channel.url)}>{group.channel.title}</button>
-                <span className="muted">{formatMB(group.totalBytes)}</span>
-              </div>
-              {group.videos.map(item => (
-                <div className="library-row" key={item.videoId}>
-                  <div className="library-thumbnail-frame"><img className="library-thumbnail" src={item.thumbnailUrl} alt="" loading="lazy" /><WatchProgressBar progress={watchProgress[item.videoId]} /></div>
-                  <div className="library-info"><a className="queue-video-link" href={`/watch?v=${encodeURIComponent(item.videoId)}`} onClick={event => {
-                    event.preventDefault();
-                    navigate(`/watch?v=${encodeURIComponent(item.videoId)}`);
-                  }}><strong>{item.title}</strong></a><div className="muted">{formatDuration(item.durationSeconds)} · {formatMB(item.sizeBytes)}</div>
-                    {!settings.hideTechnicalDetails && <div className="muted">{item.height ? `${item.height}p` : "—"} · {item.videoCodec || "—"} · {item.audioCodec || "—"}</div>}
-                    <div className="filename">{item.filename}</div>
-                  </div>
-                  <div className="row-actions"><button className="secondary" onClick={() => void downloadBlob(item.downloadUrl, item.filename)}>MKV</button><button className="danger" onClick={() => remove(item)}>Удалить</button></div>
-                </div>
-              ))}
-            </section>
-          ))}
-        </section>
-      )}
+      {location.path === "/library" && library && <LibraryView library={library} query={location.query}
+        role={session.role} navigate={navigate} apiFetch={apiFetch} sortMode={sortMode}
+        onSortModeChange={setSortMode} onDownload={item => void downloadBlob(item.downloadUrl, item.filename)}
+        onRemove={remove} hideTechnicalDetails={settings.hideTechnicalDetails} progressMap={watchProgress} />}
 
       {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={navigate} />}
 
@@ -1177,9 +1391,18 @@ export default function App() {
 
       {popup && <div className="popup-backdrop" onPointerDown={() => setPopup(null)} />}
       <div className="popup-window" ref={popupWindowRef} style={popupPosition || undefined} onClick={event => event.stopPropagation()}>
-        {popup === "queue" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={url => navigate(url, true)} onClose={() => setPopup(null)} compact />}
+        {popup === "queue" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob}
+          onNavigate={url => navigate(url, true)} onClose={() => setPopup(null)} onClear={clearCompleted} compact />}
         {popup === "download" && video && <DownloadMenu formats={video.formats} onDownload={download} onClose={() => setPopup(null)} />}
-        {popup === "settings" && <SettingsMenu settings={settings} onChange={updateSettings} onClose={() => setPopup(null)} />}
+        {popup === "settings" && <SettingsMenu settings={settings} onChange={updateSettings} onClose={() => setPopup(null)}
+          avatarUrl={avatarUrl} onAvatarUpload={uploadAvatar} isAdmin={session.role === "ADMIN"}
+          invite={invite} onGenerateInvite={generateInvite} />}
+        {popup === "user" && <UserMenu username={session.username} role={session.role} avatarUrl={avatarUrl}
+          settings={settings} onChange={updateSettings} onLogout={() => saveSession(null)} onClose={() => setPopup(null)}
+          onNavigate={url => {
+            if (url === "/settings") setPopup("settings");
+            else navigate(url);
+          }} />}
         {popup === "history" && <HistoryMenu versions={historyVersions} onSelect={selectHistory} onClose={() => setPopup(null)} />}
         {popup === "playbackLog" && <section className="playback-log-options" aria-label="Журнал подготовки видео">
           <div className="popup-header"><button className="popup-close" aria-label="Закрыть журнал" onClick={() => setPopup(null)}>×</button></div>
@@ -1191,22 +1414,44 @@ export default function App() {
 }
 
 function WatchProgressBar({ progress }: { progress?: WatchProgress }) {
-  const percent = progress ? Math.max(0, Math.min(100, progress.watchPercent)) : 0;
+  if (!progress || progress.positionSeconds <= 0) return null;
+  const percent = Math.max(0, Math.min(100, progress.watchPercent));
   return <progress className="watch-progress" max={100} value={percent} aria-label={`Прогресс просмотра: ${Math.round(percent)}%`} />;
 }
 
-function ResultGrid({ items, navigate, progressMap }: {
+function withPlaylistOrigin(item: SearchItem): string {
+  if (item.kind !== "playlist") return item.url;
+  const from = `${window.location.pathname}${window.location.search}`;
+  return `${item.url}&from=${encodeURIComponent(from)}`;
+}
+
+function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveOpen }: {
   items: SearchItem[];
   navigate: (url: string) => void;
   progressMap: WatchProgressMap;
+  archiveLocations: Record<string, LibraryLocation>;
+  onArchiveOpen: (videoId: string) => void;
 }) {
   return (
     <div className="result-grid">
       {items.map(item => (
-        <button className="result-card" key={`${item.kind}:${item.id}`} onClick={() => navigate(item.url)}>
+        <button className="result-card" key={`${item.kind}:${item.id}`} data-nav-url={withPlaylistOrigin(item)}
+          onClick={() => navigate(withPlaylistOrigin(item))}>
           <div className="result-thumbnail">
             {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
             <WatchProgressBar progress={progressMap[item.id]} />
+            {archiveLocations[item.id] && <span className="archive-badge" role="button" tabIndex={0}
+              aria-label="Открыть видео в архиве" title="В архиве"
+              onClick={event => { event.stopPropagation(); onArchiveOpen(item.id); }}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onArchiveOpen(item.id);
+                }
+              }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 3h18v4H3zm5 8h8" /></svg>
+            </span>}
           </div>
           <div className="result-kind-row"><span className="result-kind">{item.kind}</span>{item.durationSeconds != null && <span className="result-duration">{formatDuration(item.durationSeconds)}</span>}</div>
           <strong>{item.title}</strong>

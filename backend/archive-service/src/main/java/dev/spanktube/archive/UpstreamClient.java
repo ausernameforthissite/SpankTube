@@ -122,6 +122,17 @@ class UpstreamClient {
         return ids(data);
     }
 
+    PlaylistArchive playlistArchive(String playlistId) {
+        Map<String, Object> data = client.get()
+                .uri("/internal/v1/playlists/{playlistId}", playlistId)
+                .retrieve()
+                .body(Map.class);
+        return new PlaylistArchive(string(data, "title"), string(data, "channelId"), ids(data));
+    }
+
+    record PlaylistArchive(String title, String channelId, List<String> videoIds) {
+    }
+
     List<String> channelVideos(String channelId) {
         Map<String, Object> data = client.get()
                 .uri("/internal/v1/channels/{channelId}/videos", channelId)

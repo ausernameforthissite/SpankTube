@@ -192,8 +192,18 @@ class ArchiveJobService {
     }
 
     void dismiss(String jobId, String username) {
+        ArchiveModels.Job job = repository.job(jobId);
+        if (job.kind() == ArchiveModels.Kind.DOWNLOAD) {
+            downloader.discard(Path.of(properties.root(), ".downloads", jobId));
+        }
         repository.dismiss(jobId, username);
         events.publishQueueUpdate();
+    }
+
+    void clearCompleted(String username, boolean admin) {
+        repository.jobs(username, admin, null).stream()
+                .filter(job -> "completed".equals(job.status()) || "failed".equals(job.status()))
+                .forEach(job -> dismiss(job.id(), username));
     }
 
     long waitingAhead(String username) {

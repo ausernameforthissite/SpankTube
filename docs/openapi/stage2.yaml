@@ -18,6 +18,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
+  /api/v1/auth/register:
+    post:
+      operationId: registerStage2User
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistrationRequest' }
+      responses:
+        '200':
+          description: Registered user with access and rotating refresh tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
   /api/v1/auth/refresh:
     post:
       operationId: refresh
@@ -145,6 +160,37 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ProgressEntry' }
+  /api/v1/library/playlists/{playlistId}/videos:
+    get:
+      operationId: getStage2LibraryPlaylistVideos
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, all, global], default: own }
+      responses:
+        '200':
+          description: Archived videos in playlist; all scope is admin-only, global is read-only
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LibraryItem' }
+  /api/v1/library/locations:
+    get:
+      operationId: getStage2LibraryLocations
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, all, global], default: own }
+      responses:
+        '200':
+          description: Archive locations for badge navigation; all scope is admin-only, global is read-only
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LibraryLocation' }
   /api/v1/library:
     get:
       operationId: getStage2Library
@@ -158,6 +204,9 @@ paths:
         - name: direction
           in: query
           schema: { type: string, enum: [asc, desc], default: desc }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, all, global], default: own }
       responses:
         '200':
           description: Current user's library grouped by channel
@@ -307,6 +356,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ArchiveJob' }
   /api/v1/archive/jobs:
+    delete:
+      operationId: clearStage2ArchiveJobs
+      responses:
+        '204': { description: All visible terminal jobs dismissed; temporary files removed }
     get:
       operationId: getStage2ArchiveJobs
       parameters:
@@ -456,6 +509,53 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UserSettings' }
+  /api/v1/users/me/avatar:
+    get:
+      operationId: getStage2Avatar
+      responses:
+        '200':
+          description: User avatar image
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: uploadStage2Avatar
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary }
+          image/jpeg:
+            schema: { type: string, format: binary }
+          image/webp:
+            schema: { type: string, format: binary }
+      responses:
+        '204': { description: Avatar replaced; PNG, JPEG or WEBP up to 256x256 and 200 KiB }
+    delete:
+      operationId: deleteStage2Avatar
+      responses:
+        '204': { description: Avatar removed; generated animal avatar is used }
+  /api/v1/invites:
+    get:
+      operationId: getStage2Invites
+      responses:
+        '200':
+          description: Invites created by current administrator
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Invite' }
+    post:
+      operationId: createStage2Invite
+      responses:
+        '200':
+          description: New invite valid for seven days
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invite' }
   /api/v1/admin/users:
     get:
       operationId: getStage2Users
@@ -549,6 +649,13 @@ components:
       properties:
         username: { type: string }
         password: { type: string, format: password }
+    RegistrationRequest:
+      type: object
+      required: [invite, username, password]
+      properties:
+        invite: { type: string }
+        username: { type: string, minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9_.-]+$' }
+        password: { type: string, format: password, minLength: 8, maxLength: 128 }
     RefreshRequest:
       type: object
       required: [refreshToken]
@@ -699,13 +806,30 @@ components:
         filename: { type: string, description: '<YouTube title> [<videoId>] (<resolution>, <video codec>, <audio codec>).mkv' }
     LibraryChannel:
       type: object
-      required: [channel, videos, totalBytes]
+      required: [channel, videos, playlists, totalBytes]
       properties:
         channel: { $ref: '#/components/schemas/Channel' }
         videos:
           type: array
           items: { $ref: '#/components/schemas/LibraryItem' }
+        playlists:
+          type: array
+          items: { $ref: '#/components/schemas/LibraryPlaylist' }
         totalBytes: { type: integer, format: int64 }
+    LibraryPlaylist:
+      type: object
+      required: [playlistId, title, videoCount]
+      properties:
+        playlistId: { type: string }
+        title: { type: string }
+        videoCount: { type: integer, format: int64 }
+    LibraryLocation:
+      type: object
+      required: [videoId, channelId, playlistId]
+      properties:
+        videoId: { type: string }
+        channelId: { type: string }
+        playlistId: { type: [string, 'null'] }
     LibraryResponse:
       type: object
       required: [channels, usedBytes, quotaBytes, lruThresholdPercent]
@@ -774,13 +898,21 @@ components:
         positionSeconds: { type: integer, format: int64, minimum: 0 }
         watchPercent: { type: number, minimum: 0, maximum: 100 }
         lastAccessedAt: { type: string, format: date-time }
+    Invite:
+      type: object
+      required: [code, expiresAt]
+      properties:
+        code: { type: string }
+        expiresAt: { type: string, format: date-time }
+        usedBy: { type: [string, 'null'] }
     UserSettings:
       type: object
-      required: [autoplay, hideTechnicalDetails, preferBestQuality]
+      required: [autoplay, hideTechnicalDetails, preferBestQuality, theme]
       properties:
         autoplay: { type: boolean, default: true }
         hideTechnicalDetails: { type: boolean, default: false }
         preferBestQuality: { type: boolean, default: true }
+        theme: { type: string, enum: [system, light, dark], default: system }
     SettingsPatch:
       type: object
       minProperties: 1
@@ -788,6 +920,7 @@ components:
         autoplay: { type: boolean }
         hideTechnicalDetails: { type: boolean }
         preferBestQuality: { type: boolean }
+        theme: { type: string, enum: [system, light, dark] }
     ArchiveJob:
       type: object
       required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt, updatedAt, purpose, stage, bytesDownloaded, totalBytes, speedBps, title, options]

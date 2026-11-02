@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["registerStage2User"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -156,6 +172,38 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getStage2WatchProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/playlists/{playlistId}/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2LibraryPlaylistVideos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2LibraryLocations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -366,7 +414,7 @@ export interface paths {
         get: operations["getStage2ArchiveJobs"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["clearStage2ArchiveJobs"];
         options?: never;
         head?: never;
         patch?: never;
@@ -484,6 +532,38 @@ export interface paths {
         patch: operations["updateStage2Settings"];
         trace?: never;
     };
+    "/api/v1/users/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Avatar"];
+        put: operations["uploadStage2Avatar"];
+        post?: never;
+        delete: operations["deleteStage2Avatar"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2Invites"];
+        put?: never;
+        post: operations["createStage2Invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -537,6 +617,12 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         LoginRequest: {
+            username: string;
+            /** Format: password */
+            password: string;
+        };
+        RegistrationRequest: {
+            invite: string;
             username: string;
             /** Format: password */
             password: string;
@@ -689,8 +775,20 @@ export interface components {
         LibraryChannel: {
             channel: components["schemas"]["Channel"];
             videos: components["schemas"]["LibraryItem"][];
+            playlists: components["schemas"]["LibraryPlaylist"][];
             /** Format: int64 */
             totalBytes: number;
+        };
+        LibraryPlaylist: {
+            playlistId: string;
+            title: string;
+            /** Format: int64 */
+            videoCount: number;
+        };
+        LibraryLocation: {
+            videoId: string;
+            channelId: string;
+            playlistId: string | null;
         };
         LibraryResponse: {
             channels: components["schemas"]["LibraryChannel"][];
@@ -765,6 +863,12 @@ export interface components {
             /** Format: date-time */
             lastAccessedAt: string;
         };
+        Invite: {
+            code: string;
+            /** Format: date-time */
+            expiresAt: string;
+            usedBy?: string | null;
+        };
         UserSettings: {
             /** @default true */
             autoplay: boolean;
@@ -772,11 +876,18 @@ export interface components {
             hideTechnicalDetails: boolean;
             /** @default true */
             preferBestQuality: boolean;
+            /**
+             * @default system
+             * @enum {string}
+             */
+            theme: "system" | "light" | "dark";
         };
         SettingsPatch: {
             autoplay?: boolean;
             hideTechnicalDetails?: boolean;
             preferBestQuality?: boolean;
+            /** @enum {string} */
+            theme?: "system" | "light" | "dark";
         };
         ArchiveJob: {
             /** Format: uuid */
@@ -926,6 +1037,30 @@ export interface operations {
         };
         responses: {
             /** @description Access and rotating refresh tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+        };
+    };
+    registerStage2User: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Registered user with access and rotating refresh tokens */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1144,12 +1279,59 @@ export interface operations {
             };
         };
     };
+    getStage2LibraryPlaylistVideos: {
+        parameters: {
+            query?: {
+                scope?: "own" | "all" | "global";
+            };
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived videos in playlist; all scope is admin-only, global is read-only */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryItem"][];
+                };
+            };
+        };
+    };
+    getStage2LibraryLocations: {
+        parameters: {
+            query?: {
+                scope?: "own" | "all" | "global";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archive locations for badge navigation; all scope is admin-only, global is read-only */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryLocation"][];
+                };
+            };
+        };
+    };
     getStage2Library: {
         parameters: {
             query?: {
                 channelId?: string;
                 sort?: "size" | "duration" | "title";
                 direction?: "asc" | "desc";
+                scope?: "own" | "all" | "global";
             };
             header?: never;
             path?: never;
@@ -1467,6 +1649,24 @@ export interface operations {
             };
         };
     };
+    clearStage2ArchiveJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All visible terminal jobs dismissed; temporary files removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     streamStage2Queue: {
         parameters: {
             query?: never;
@@ -1675,6 +1875,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserSettings"];
+                };
+            };
+        };
+    };
+    getStage2Avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User avatar image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    uploadStage2Avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+                "image/webp": string;
+            };
+        };
+        responses: {
+            /** @description Avatar replaced; PNG */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteStage2Avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Avatar removed; generated animal avatar is used */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getStage2Invites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invites created by current administrator */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invite"][];
+                };
+            };
+        };
+    };
+    createStage2Invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New invite valid for seven days */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invite"];
                 };
             };
         };

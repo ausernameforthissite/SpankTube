@@ -65,6 +65,19 @@ class CatalogClient {
         }
     }
 
+    void registerPlaylist(String username, String playlistId, String title, String channelId,
+            java.util.List<String> videoIds) {
+        client.post()
+                .uri("/internal/v1/library/playlists")
+                .body(new PlaylistRegistration(username, playlistId, title, channelId, videoIds))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    record PlaylistRegistration(String username, String playlistId, String title, String channelId,
+            java.util.List<String> videoIds) {
+    }
+
     void prepare(String username, long requiredBytes, String videoId) {
         prepare(username, requiredBytes, videoId, false);
     }

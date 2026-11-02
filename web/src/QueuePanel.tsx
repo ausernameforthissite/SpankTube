@@ -48,20 +48,24 @@ function DismissIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v6m4-6v6" /></svg>;
 }
 
-export function QueuePanel({ jobs, beforeYou, onDownload, onDismiss, onNavigate, onClose, compact = false }: {
+export function QueuePanel({ jobs, beforeYou, onDownload, onDismiss, onNavigate, onClose, onClear, compact = false }: {
   jobs: QueueJob[];
   beforeYou: number;
   onDownload: (job: QueueJob) => void;
   onDismiss: (job: QueueJob) => void;
   onNavigate: (url: string) => void;
   onClose?: () => void;
+  onClear?: () => void;
   compact?: boolean;
 }) {
   const ordered = [...jobs].sort((a, b) => Number(active(b)) - Number(active(a))
     || (active(a) ? a.priority - b.priority || a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt)));
   return (
     <section className={`queue-content ${compact ? "compact" : ""}`} aria-label="Очередь скачивания">
-      {onClose && <div className="popup-header"><button className="popup-close" aria-label="Закрыть очередь" onClick={onClose}>×</button></div>}
+      {onClose && <div className="popup-header queue-popup-header">
+        {onClear && <button className="secondary" onClick={onClear}>Очистить</button>}
+        <button className="popup-close" aria-label="Закрыть очередь" onClick={onClose}>×</button>
+      </div>}
       <div className={onClose ? "queue-list queue-list-with-close" : "queue-list"}>
         {beforeYou > 0 && <p className="queue-ahead">Перед вами в очереди {beforeYou} видео</p>}
         {ordered.length === 0 && <p className="muted">Заданий пока нет</p>}
@@ -88,8 +92,10 @@ export function QueuePanel({ jobs, beforeYou, onDownload, onDismiss, onNavigate,
                   {!active(job) && <button className="secondary icon-button" aria-label="Убрать" title="Убрать" onClick={() => onDismiss(job)}><DismissIcon /></button>}
                 </div>
               </div>
-              <label className="progress-label">Элементы: {job.completedCount}/{job.totalCount}{job.failedCount > 0 ? ` · ошибок ${job.failedCount}` : ""}</label>
-              <progress max={job.totalCount} value={Math.min(job.completedCount + job.failedCount, job.totalCount)} aria-label="Прогресс по числу элементов" />
+              {job.status !== "completed" && <>
+                <label className="progress-label">Элементы: {job.completedCount}/{job.totalCount}{job.failedCount > 0 ? ` · ошибок ${job.failedCount}` : ""}</label>
+                <progress max={job.totalCount} value={Math.min(job.completedCount + job.failedCount, job.totalCount)} aria-label="Прогресс по числу элементов" />
+              </>}
               {active(job) && <>
                 <label className="progress-label">
                   {bytes(downloaded)} / {total > 0 ? bytes(total) : "неизвестно"} · {remaining > 0 ? `осталось ${bytes(remaining)}` : "завершено"}

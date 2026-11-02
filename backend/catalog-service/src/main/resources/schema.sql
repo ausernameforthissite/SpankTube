@@ -70,3 +70,22 @@ create index if not exists video_versions_current_idx on video_versions(video_id
 
 create index if not exists user_views_lru_idx on user_views(user_id, last_accessed_at);
 create index if not exists user_views_video_idx on user_views(video_id);
+
+create table if not exists library_playlists (
+    user_id text not null,
+    playlist_id text not null,
+    channel_id text not null,
+    title text not null,
+    created_at timestamptz not null default now(),
+    primary key (user_id, playlist_id)
+);
+
+create table if not exists library_playlist_items (
+    user_id text not null,
+    playlist_id text not null,
+    video_id text not null,
+    primary key (user_id, playlist_id, video_id)
+);
+
+create index if not exists library_playlists_channel_idx on library_playlists(user_id, channel_id);
+create index if not exists library_playlist_items_video_idx on library_playlist_items(user_id, video_id);

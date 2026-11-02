@@ -26,13 +26,15 @@ class ArchiveController {
 
     private final ArchiveJobService jobs;
     private final UpstreamClient upstreamClient;
+    private final CatalogClient catalogClient;
     private final ArchiveEvents events;
     private final ArchiveProperties properties;
 
-    ArchiveController(ArchiveJobService jobs, UpstreamClient upstreamClient,
+    ArchiveController(ArchiveJobService jobs, UpstreamClient upstreamClient, CatalogClient catalogClient,
             ArchiveEvents events, ArchiveProperties properties) {
         this.jobs = jobs;
         this.upstreamClient = upstreamClient;
+        this.catalogClient = catalogClient;
         this.events = events;
         this.properties = properties;
     }
@@ -61,7 +63,9 @@ class ArchiveController {
 
     @PostMapping("/api/v1/playlists/{playlistId}/save")
     ResponseEntity<ArchiveModels.Job> savePlaylist(@PathVariable String playlistId, HttpServletRequest request) {
-        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, upstreamClient.playlistVideos(playlistId), request);
+        UpstreamClient.PlaylistArchive playlist = upstreamClient.playlistArchive(playlistId);
+        catalogClient.registerPlaylist(username(request), playlistId, playlist.title(), playlist.channelId(), playlist.videoIds());
+        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, playlist.videoIds(), request);
     }
 
     @PostMapping("/api/v1/channels/{channelId}/save")
@@ -73,6 +77,12 @@ class ArchiveController {
     List<ArchiveModels.Job> jobs(HttpServletRequest request,
             @RequestParam(required = false) String status) {
         return jobs.jobs(username(request), admin(request), status);
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/api/v1/archive/jobs")
+    ResponseEntity<Void> clearCompleted(HttpServletRequest request) {
+        jobs.clearCompleted(username(request), admin(request));
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/archive/jobs/{jobId}")

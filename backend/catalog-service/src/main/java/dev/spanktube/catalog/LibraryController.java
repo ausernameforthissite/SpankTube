@@ -36,8 +36,47 @@ class LibraryController {
     LibraryModels.LibraryResponse library(HttpServletRequest request,
             @RequestParam(required = false) String channelId,
             @RequestParam(defaultValue = "size") String sort,
-            @RequestParam(defaultValue = "desc") String direction) {
-        return libraryService.library(identityService.required(request).username(), channelId, sort, direction);
+            @RequestParam(defaultValue = "desc") String direction,
+            @RequestParam(required = false) String scope) {
+        String username = identityService.required(request).username();
+        if ("all".equals(scope)) {
+            identityService.admin(request);
+            username = null;
+        } else if ("global".equals(scope)) {
+            username = null;
+        }
+        return libraryService.library(username, channelId, sort, direction);
+    }
+
+    @GetMapping("/api/v1/library/playlists/{playlistId}/videos")
+    List<LibraryModels.LibraryItem> playlistItems(@PathVariable String playlistId, HttpServletRequest request,
+            @RequestParam(required = false) String scope) {
+        String username = identityService.required(request).username();
+        if ("all".equals(scope)) {
+            identityService.admin(request);
+            username = null;
+        } else if ("global".equals(scope)) {
+            username = null;
+        }
+        return libraryService.playlistItems(username, playlistId);
+    }
+
+    @GetMapping("/api/v1/library/locations")
+    List<LibraryModels.LibraryLocation> locations(HttpServletRequest request, @RequestParam(required = false) String scope) {
+        String username = identityService.required(request).username();
+        if ("all".equals(scope)) {
+            identityService.admin(request);
+            username = null;
+        } else if ("global".equals(scope)) {
+            username = null;
+        }
+        return libraryService.locations(username);
+    }
+
+    @PostMapping("/internal/v1/library/playlists")
+    ResponseEntity<Void> registerPlaylist(@RequestBody LibraryModels.RegisterPlaylist registration) {
+        libraryService.registerPlaylist(registration);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/internal/v1/library/existing/{videoId}")

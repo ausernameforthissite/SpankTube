@@ -63,7 +63,57 @@ export type WatchProgress = {
 
 export type WatchProgressMap = Record<string, WatchProgress>;
 
-export type UserSettings = { autoplay: boolean; hideTechnicalDetails: boolean; preferBestQuality: boolean };
+export type UserSettings = {
+  autoplay: boolean;
+  hideTechnicalDetails: boolean;
+  preferBestQuality: boolean;
+  theme: "light" | "dark" | "system";
+};
+
+export type LibraryItem = {
+  videoId: string;
+  title: string;
+  durationSeconds: number;
+  sizeBytes: number;
+  sizeMB: number;
+  downloadUrl: string;
+  lastAccessedAt: string;
+  thumbnailUrl: string;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  audioBitrate: number | null;
+  filename: string;
+};
+
+export type LibraryChannelInfo = {
+  channelId: string;
+  title: string;
+  handle: string | null;
+  customPath: string | null;
+  url: string;
+  avatarUrl: string;
+  subscriberCount: number | null;
+};
+
+export type LibraryPlaylist = { playlistId: string; title: string; videoCount: number };
+
+export type LibraryChannel = {
+  channel: LibraryChannelInfo;
+  videos: LibraryItem[];
+  playlists: LibraryPlaylist[];
+  totalBytes: number;
+};
+
+export type LibraryResponse = {
+  channels: LibraryChannel[];
+  usedBytes: number;
+  quotaBytes: number;
+  lruThresholdPercent: number;
+};
+
+export type LibraryLocation = { videoId: string; channelId: string; playlistId: string | null };
 
 export type ArchiveVersion = {
   versionId: string;

@@ -159,16 +159,67 @@ class CatalogRepository {
     }
 
     List<LibraryModels.Channel> channels(String username) {
-        return jdbc.query("select distinct c.channel_id, c.title, c.handle, c.custom_path, c.avatar_url, c.subscriber_count "
-                        + "from user_views uv join videos v on v.video_id = uv.video_id "
-                        + "join channels c on c.channel_id = v.channel_id where uv.user_id = ?",
-                this::mapChannel, username);
+        String sql = "select distinct c.channel_id, c.title, c.handle, c.custom_path, c.avatar_url, c.subscriber_count "
+                + "from channels c where c.channel_id in ("
+                + "select v.channel_id from user_views uv join videos v on v.video_id = uv.video_id"
+                + (username == null ? "" : " where uv.user_id = ?")
+                + " union select channel_id from library_playlists" + (username == null ? "" : " where user_id = ?") + ")";
+        return username == null ? jdbc.query(sql, this::mapChannel)
+                : jdbc.query(sql, this::mapChannel, username, username);
     }
 
     List<LibraryModels.Video> channelVideos(String username, String channelId) {
-        return jdbc.query("select v.video_id, v.title, v.published_at, v.duration_sec, v.archived_path, v.quality, v.size_bytes, uv.last_accessed_at, v.width, v.height, v.video_codec, v.audio_codec, v.audio_bitrate "
-                        + "from user_views uv join videos v on v.video_id = uv.video_id "
-                        + "where uv.user_id = ? and v.channel_id = ?", this::mapVideo, username, channelId);
+        String sql = "select distinct on (v.video_id) v.video_id, v.title, v.published_at, v.duration_sec, v.archived_path, "
+                + "v.quality, v.size_bytes, uv.last_accessed_at, v.width, v.height, v.video_codec, v.audio_codec, v.audio_bitrate "
+                + "from user_views uv join videos v on v.video_id = uv.video_id where v.channel_id = ?"
+                + (username == null ? "" : " and uv.user_id = ?") + " order by v.video_id, uv.last_accessed_at desc";
+        return username == null ? jdbc.query(sql, this::mapVideo, channelId)
+                : jdbc.query(sql, this::mapVideo, channelId, username);
+    }
+
+    void upsertPlaylist(LibraryModels.RegisterPlaylist request) {
+        jdbc.update("insert into library_playlists(user_id, playlist_id, channel_id, title) values (?, ?, ?, ?) "
+                        + "on conflict(user_id, playlist_id) do update set channel_id = excluded.channel_id, title = excluded.title",
+                request.username(), request.playlistId(), request.channelId(), request.title());
+        request.videoIds().forEach(videoId -> jdbc.update(
+                "insert into library_playlist_items(user_id, playlist_id, video_id) values (?, ?, ?) on conflict do nothing",
+                request.username(), request.playlistId(), videoId));
+    }
+
+    List<LibraryModels.LibraryPlaylist> playlists(String username, String channelId) {
+        String sql = "select lp.playlist_id, lp.title, count(distinct lpi.video_id) from library_playlists lp "
+                + "left join library_playlist_items lpi on lpi.user_id = lp.user_id and lpi.playlist_id = lp.playlist_id "
+                + "where lp.channel_id = ?" + (username == null ? "" : " and lp.user_id = ?")
+                + " group by lp.playlist_id, lp.title order by lp.title";
+        Object[] parameters = username == null ? new Object[] { channelId } : new Object[] { channelId, username };
+        return jdbc.query(sql, parameters, (rs, rowNum) -> new LibraryModels.LibraryPlaylist(
+                rs.getString("playlist_id"), rs.getString("title"), rs.getLong(3)));
+    }
+
+    List<LibraryModels.Video> playlistVideos(String username, String playlistId) {
+        String sql = "select distinct on (v.video_id) v.video_id, v.title, v.published_at, v.duration_sec, v.archived_path, "
+                + "v.quality, v.size_bytes, uv.last_accessed_at, v.width, v.height, v.video_codec, v.audio_codec, v.audio_bitrate "
+                + "from library_playlist_items lpi join user_views uv on uv.user_id = lpi.user_id and uv.video_id = lpi.video_id "
+                + "join videos v on v.video_id = lpi.video_id where lpi.playlist_id = ?"
+                + (username == null ? "" : " and lpi.user_id = ?") + " order by v.video_id, uv.last_accessed_at desc";
+        return username == null ? jdbc.query(sql, this::mapVideo, playlistId)
+                : jdbc.query(sql, this::mapVideo, playlistId, username);
+    }
+
+    List<LibraryModels.LibraryLocation> locations(String username) {
+        String sql = "select distinct v.video_id, v.channel_id, null::text as playlist_id from user_views uv "
+                + "join videos v on v.video_id = uv.video_id" + (username == null ? "" : " where uv.user_id = ?")
+                + " union all select distinct lpi.video_id, lp.channel_id, lp.playlist_id from library_playlist_items lpi "
+                + "join library_playlists lp on lp.user_id = lpi.user_id and lp.playlist_id = lpi.playlist_id "
+                + "join videos v on v.video_id = lpi.video_id" + (username == null ? "" : " where lp.user_id = ?")
+                + " order by playlist_id nulls last";
+        return username == null ? jdbc.query(sql, this::mapLocation)
+                : jdbc.query(sql, this::mapLocation, username, username);
+    }
+
+    private LibraryModels.LibraryLocation mapLocation(ResultSet rs, int rowNum) throws SQLException {
+        return new LibraryModels.LibraryLocation(rs.getString("video_id"), rs.getString("channel_id"),
+                rs.getString("playlist_id"));
     }
 
     String deleteLink(String username, String videoId) {
@@ -179,6 +230,7 @@ class CatalogRepository {
             return null;
         }
         jdbc.update("delete from user_views where user_id = ? and video_id = ?", username, videoId);
+        jdbc.update("delete from library_playlist_items where user_id = ? and video_id = ?", username, videoId);
         Integer remaining = jdbc.queryForObject("select count(*) from user_views where video_id = ?", Integer.class, videoId);
         if (remaining != null && remaining == 0) {
             jdbc.update("update video_versions set superseded_at = now(), deleted_at = now() "

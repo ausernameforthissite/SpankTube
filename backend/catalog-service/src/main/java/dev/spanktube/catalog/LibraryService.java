@@ -46,12 +46,27 @@ class LibraryService {
                             .sorted(itemComparator(sort, direction))
                             .toList();
                     long total = items.stream().mapToLong(LibraryModels.LibraryItem::sizeBytes).sum();
-                    return new LibraryModels.LibraryChannel(channel, items, total);
+                    return new LibraryModels.LibraryChannel(channel, items,
+                            repository.playlists(username, channel.channelId()), total);
                 })
                 .toList();
-        LibraryModels.QuotaResponse quota = quotaClient.resolve(username);
-        return new LibraryModels.LibraryResponse(channels, repository.usage(username),
+        LibraryModels.QuotaResponse quota = username == null
+                ? new LibraryModels.QuotaResponse("admin", "ADMIN", null, 0, 90) : quotaClient.resolve(username);
+        return new LibraryModels.LibraryResponse(channels, username == null ? 0 : repository.usage(username),
                 quota.effectiveQuotaBytes(), quota.lruThresholdPercent());
+    }
+
+    List<LibraryModels.LibraryItem> playlistItems(String username, String playlistId) {
+        return repository.playlistVideos(username, playlistId).stream().map(this::libraryItem).toList();
+    }
+
+    List<LibraryModels.LibraryLocation> locations(String username) {
+        return repository.locations(username);
+    }
+
+    @Transactional
+    public void registerPlaylist(LibraryModels.RegisterPlaylist request) {
+        repository.upsertPlaylist(request);
     }
 
     long usage(String username) {

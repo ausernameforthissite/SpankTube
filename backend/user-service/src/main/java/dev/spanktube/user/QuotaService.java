@@ -17,7 +17,7 @@ class QuotaService {
     }
 
     UserQuota resolve(String username) {
-        AuthProperties.Account account = authProperties.users().get(username);
+        AuthProperties.Account account = account(username);
         if (account == null) {
             throw new IllegalArgumentException("Unknown user " + username);
         }
@@ -30,7 +30,7 @@ class QuotaService {
     }
 
     UserQuota update(String username, Long quotaBytes) {
-        AuthProperties.Account account = authProperties.users().get(username);
+        AuthProperties.Account account = account(username);
         if (account == null) {
             throw new IllegalArgumentException("Unknown user " + username);
         }
@@ -44,6 +44,20 @@ class QuotaService {
                     + "on conflict(username) do update set quota_bytes = excluded.quota_bytes", username, quotaBytes);
         }
         return resolve(username);
+    }
+
+    private AuthProperties.Account account(String username) {
+        AuthProperties.Account configured = authProperties.users().get(username);
+        if (configured != null) {
+            return configured;
+        }
+        return jdbc.query("select password_hash, role from local_users where username = ?", rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            return new AuthProperties.Account(rs.getString("password_hash"),
+                    AuthProperties.Role.valueOf(rs.getString("role")));
+        }, username);
     }
 
     record UserQuota(String username, AuthProperties.Role role, Long quotaBytes,
