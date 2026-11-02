@@ -840,22 +840,15 @@ export default function App() {
     videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + offset));
   }, [videoElement, controlsReady]);
 
-  const doubleClickSeek = useCallback((event: ReactMouseEvent<HTMLVideoElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    if (event.clientY >= bounds.bottom - 48) return;
+  const doubleClickSeek = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     if (Date.now() - lastTouchSeekRef.current < 500) return;
     seekFromPointer(event.clientX);
   }, [seekFromPointer]);
 
-  const touchSeek = useCallback((event: ReactPointerEvent<HTMLVideoElement>) => {
+  const touchSeek = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType !== "touch" || !event.isPrimary) return;
     if (!controlsReady) {
-      lastTouchTapRef.current = null;
-      return;
-    }
-    const bounds = event.currentTarget.getBoundingClientRect();
-    if (event.clientY >= bounds.bottom - 48) {
       lastTouchTapRef.current = null;
       return;
     }
@@ -984,7 +977,6 @@ export default function App() {
             <div className="video-frame">
               <video ref={setVideoElement} controls={controlsReady} playsInline
                 aria-label="Видеоплеер. Двойной клик слева — на 10 секунд назад, справа — вперёд"
-                onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek}
                 onLoadedMetadata={syncMediaReady}
                 onCanPlay={() => {
                   syncMediaReady();
@@ -1001,6 +993,8 @@ export default function App() {
                   setPlaybackStatus("Пауза");
                   void reportProgress();
                 }} />
+              {controlsReady && <div className="seek-gestures" aria-hidden="true"
+                onClick={togglePlayback} onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek} />}
               {!controlsReady && <PlaybackLog lines={playbackLogs} />}
             </div>
             <div className="playback">
