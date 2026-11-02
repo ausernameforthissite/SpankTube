@@ -125,6 +125,11 @@ class MediaController {
                                 HttpStatus.NOT_FOUND, "Unknown subtitle " + trackId))));
     }
 
+    @GetMapping("/media/image")
+    Mono<ResponseEntity<byte[]>> image(@RequestParam String url) {
+        return thumbnailService.image(url);
+    }
+
     @GetMapping("/media/v/{videoId}/thumbnail")
     Mono<ResponseEntity<byte[]>> videoThumbnail(@PathVariable String videoId,
             @RequestParam(defaultValue = "hq") String quality) {

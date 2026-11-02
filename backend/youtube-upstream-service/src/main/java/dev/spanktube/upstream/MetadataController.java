@@ -25,15 +25,17 @@ class MetadataController {
     @GetMapping("/api/v1/channels/{channelId}")
     Mono<PublicChannel> channel(@PathVariable String channelId,
             @RequestParam(required = false) String cursor) {
-        return Mono.fromCallable(() -> {
-                    ChannelDetails channel = provider.channel(channelId, cursor);
-                    SearchResults playlists = provider.channelPlaylists(channelId, null);
-                    return new ChannelDetails(channel.channelId(), channel.title(), channel.handle(), channel.customPath(),
-                            channel.avatarUrl(), channel.subscriberCount(), channel.videos(), playlists.items(),
-                            channel.nextCursor());
-                })
-                .map(PublicChannel::from)
+        Mono<ChannelDetails> channel = Mono.fromCallable(() -> provider.channel(channelId, cursor))
                 .subscribeOn(Schedulers.boundedElastic());
+        Mono<SearchResults> playlists = Mono.fromCallable(() -> provider.channelPlaylists(channelId, null))
+                .subscribeOn(Schedulers.boundedElastic());
+        return Mono.zip(channel, playlists)
+                .map(result -> {
+                    ChannelDetails details = result.getT1();
+                    return PublicChannel.from(new ChannelDetails(details.channelId(), details.title(), details.handle(),
+                            details.customPath(), details.avatarUrl(), details.subscriberCount(), details.videos(),
+                            result.getT2().items(), details.nextCursor()));
+                });
     }
 
     @GetMapping("/api/v1/channels/{channelId}/videos")

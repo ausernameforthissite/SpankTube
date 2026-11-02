@@ -19,7 +19,7 @@ public record PublicChannel(
                 : details.handle() != null ? "/@" + details.handle()
                 : "/channel/" + details.channelId();
         return new PublicChannel(details.channelId(), details.title(), details.handle(), details.customPath(), url,
-                "/media/channel/" + details.channelId() + "/avatar", details.subscriberCount(),
-                details.videos(), details.playlists(), details.nextCursor());
+                MediaLinks.thumbnail(details.avatarUrl(), "/media/channel/" + details.channelId() + "/avatar"),
+                details.subscriberCount(), details.videos(), details.playlists(), details.nextCursor());
     }
 }

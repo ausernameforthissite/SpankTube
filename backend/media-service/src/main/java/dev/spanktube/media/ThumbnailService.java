@@ -2,7 +2,9 @@ package dev.spanktube.media;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import dev.spanktube.egress.EgressProbe;
 import org.springframework.beans.factory.ObjectProvider;
@@ -23,6 +25,7 @@ class ThumbnailService {
     private final WebClient youtubeClient;
     private final EgressProbe egressProbe;
     private final ImageCache cache;
+    private final ConcurrentHashMap<String, Mono<ResponseEntity<byte[]>>> inFlight = new ConcurrentHashMap<>();
 
     ThumbnailService(@Qualifier("youtubeWebClient") WebClient youtubeClient,
             ObjectProvider<EgressProbe> egressProbe, ImageCache cache) {
@@ -59,11 +62,11 @@ class ThumbnailService {
             return Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "YouTube egress is unavailable: " + egressProbe.lastError()));
         }
-        return youtubeClient.get()
+        return inFlight.computeIfAbsent(url, ignored -> youtubeClient.get()
                 .uri(url)
                 .retrieve()
                 .toEntity(byte[].class)
-                .timeout(Duration.ofSeconds(15))
+                .timeout(Duration.ofSeconds(8))
                 .flatMap(response -> {
                     byte[] body = response.getBody();
                     if (body == null || body.length == 0) {
@@ -74,8 +77,19 @@ class ThumbnailService {
                     cache.put(url, body, contentType);
                     return Mono.just(response(body, contentType));
                 })
-                .onErrorResume(error -> error instanceof WebClientResponseException.NotFound
-                        || error instanceof WebClientResponseException.Gone, error -> fetch(urls, index + 1));
+                .onErrorResume(ThumbnailService::canTryAnotherVariant, error -> fetch(urls, index + 1))
+                .doFinally(signal -> inFlight.remove(url))
+                .cache());
+    }
+
+    private static boolean canTryAnotherVariant(Throwable error) {
+        if (error instanceof WebClientResponseException.NotFound
+                || error instanceof WebClientResponseException.Gone
+                || error instanceof TimeoutException || error instanceof java.io.IOException) {
+            return true;
+        }
+        return error instanceof WebClientResponseException response
+                && (response.getStatusCode().value() == 429 || response.getStatusCode().is5xxServerError());
     }
 
     static List<String> thumbnailUrls(String videoId, String quality) {

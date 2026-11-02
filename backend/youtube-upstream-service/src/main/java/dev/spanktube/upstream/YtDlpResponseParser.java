@@ -132,11 +132,12 @@ class YtDlpResponseParser {
             case "playlist" -> "/playlist?list=" + id;
             default -> "/watch?v=" + id;
         };
-        String thumbnail = switch (kind) {
+        String fallback = switch (kind) {
             case "channel" -> "/media/channel/" + id + "/avatar";
             case "playlist" -> "/media/playlist/" + id + "/thumbnail";
             default -> "/media/v/" + id + "/thumbnail";
         };
+        String thumbnail = "video".equals(kind) ? fallback : MediaLinks.thumbnail(bestThumbnail(entry), fallback);
         Integer videoCount = intValue(entry, "video_count");
         if (videoCount == null) {
             videoCount = intValue(entry, "playlist_count");

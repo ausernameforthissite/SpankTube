@@ -31,7 +31,8 @@ class GatewaySecurityConfiguration {
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/actuator/health").permitAll()
                         .pathMatchers(org.springframework.http.HttpMethod.GET,
-                                "/media/v/*/thumbnail", "/media/channel/*/avatar", "/media/playlist/*/thumbnail").permitAll()
+                                "/media/v/*/thumbnail", "/media/channel/*/avatar", "/media/playlist/*/thumbnail",
+                                "/media/image").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();

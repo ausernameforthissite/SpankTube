@@ -36,7 +36,8 @@ public record PublicVideo(
                 : "/channel/" + details.channelId();
         return new PublicVideo(details.videoId(), details.title(), details.description(),
                 details.channelId(), details.channelName(),
-                details.channelAvatarUrl() == null ? null : "/media/channel/" + details.channelId() + "/avatar",
+                MediaLinks.thumbnail(details.channelAvatarUrl(),
+                        details.channelId() == null ? null : "/media/channel/" + details.channelId() + "/avatar"),
                 channelUrl, prefix + "/thumbnail", details.durationSeconds(), details.viewCount(), details.likeCount(),
                 details.publishedAt(), prefix + "/manifest.mpd", formats, subtitles);
     }
