@@ -22,7 +22,9 @@ button.secondary { color: #d8deea; background: #303745; }
 .auth { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .auth form { width: 100%; }
 .video-search input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-.error { padding: 16px; margin-bottom: 16px; border: 1px solid #9c4444; border-radius: 10px; background: #381d24; color: #ffd9df; overflow-wrap: anywhere; }
+.error { position: relative; padding: 16px; margin-bottom: 16px; border: 1px solid #9c4444; border-radius: 10px; background: #381d24; color: #ffd9df; overflow-wrap: anywhere; }
+.error strong { display: block; padding-right: 28px; }
+.error-close { position: absolute; top: 8px; right: 8px; padding: 2px 8px; color: #ffd9df; background: transparent; font-size: 1.25rem; }
 .error ul { margin-bottom: 0; }
 .player { padding: 0; overflow: hidden; background: #000; }
 .video-frame { position: relative; background: #000; }

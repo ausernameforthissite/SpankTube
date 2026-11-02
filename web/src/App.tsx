@@ -965,6 +965,8 @@ export default function App() {
 
       {error && (
         <section className="error" role="alert">
+          <button type="button" className="error-close" aria-label="Закрыть сообщение об ошибке" title="Закрыть"
+            onClick={() => { setError(null); setActions([]); }}>×</button>
           <strong>{error}</strong>
           {actions.length > 0 && <ul>{actions.map(action => <li key={action}>{action}</li>)}</ul>}
         </section>
