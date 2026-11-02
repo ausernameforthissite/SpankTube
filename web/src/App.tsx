@@ -119,6 +119,17 @@ function formatDuration(seconds: number | null | undefined): string {
     : `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
+function parseTimecode(value: string | null): number | null {
+  if (!value) return null;
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(\d+)s$/.exec(value);
+  if (!match) return null;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3]);
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
 function formatMB(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(bytes >= 100_000_000 ? 0 : 1)} МБ`;
 }
@@ -209,7 +220,9 @@ export default function App() {
   const controlsReady = playerReady || mediaReady;
   const authenticated = session !== null;
   const watchId = location.path === "/watch" ? location.query.get("v") : null;
-  const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, [watchId]);
+  const requestedStart = watchId ? parseTimecode(location.query.get("t")) : null;
+  const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    [watchId, requestedStart]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -595,7 +608,9 @@ export default function App() {
       }
       await progressRequestRef.current;
       const resume = watchProgressRef.current[watchId];
-      if (resume && resume.positionSeconds > 0 && resume.positionSeconds < videoElement.duration - 1) {
+      if (requestedStart !== null && requestedStart < videoElement.duration) {
+        videoElement.currentTime = requestedStart;
+      } else if (resume && resume.positionSeconds > 0 && resume.positionSeconds < videoElement.duration - 1) {
         videoElement.currentTime = resume.positionSeconds;
       }
       player.configure("abr.enabled", !preferBestQualityRef.current);
@@ -631,7 +646,7 @@ export default function App() {
       setPlayerReady(false);
       if (player) playerDestroyRef.current = player.destroy();
     };
-  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion]);
+  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion, requestedStart]);
 
   useEffect(() => {
     if (!video || !videoElement || !video.sponsorBlock?.length) return;
