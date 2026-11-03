@@ -159,10 +159,11 @@ class UpstreamClient {
                 .uri("/internal/v1/playlists/{playlistId}", playlistId)
                 .retrieve()
                 .body(Map.class);
-        return new PlaylistArchive(string(data, "title"), string(data, "channelId"), ids(data));
+        return new PlaylistArchive(string(data, "title"), string(data, "channelId"), ids(data),
+                string(data, "thumbnailUrl"));
     }
 
-    record PlaylistArchive(String title, String channelId, List<String> videoIds) {
+    record PlaylistArchive(String title, String channelId, List<String> videoIds, String thumbnailUrl) {
     }
 
     List<String> channelVideos(String channelId) {

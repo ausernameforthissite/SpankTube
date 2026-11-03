@@ -17,6 +17,7 @@ export function UserMenu({ username, role, avatarUrl, settings, onChange, onNavi
         <img className="avatar user-avatar-large" src={avatarUrl} alt="" />
         <div><strong>{username}</strong><div className="muted">{role}</div></div>
       </div>
+      <button className="link" data-nav-url="/user-playlists" onClick={() => onNavigate("/user-playlists")}>Плейлисты</button>
       <button className="link" data-nav-url="/library" onClick={() => onNavigate("/library")}>Библиотека</button>
       <button className="link" onClick={() => onNavigate("/settings")}>Настройки</button>
       {role === "ADMIN" && <button className="link" data-nav-url="/admin" onClick={() => onNavigate("/admin")}>Квоты</button>}

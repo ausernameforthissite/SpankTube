@@ -146,6 +146,13 @@ class MediaController {
         return upstreamClient.playlistThumbnail(playlistId).flatMap(thumbnailService::image);
     }
 
+    @GetMapping("/media/playlist/{playlistId}/archive-thumbnail")
+    Mono<ResponseEntity<FileSystemResource>> archivedPlaylistThumbnail(@PathVariable String playlistId) {
+        return archivePlayback.archivedPlaylistThumbnail(playlistId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Archived playlist thumbnail not found")));
+    }
+
     private Mono<ResponseEntity<Flux<DataBuffer>>> proxy(URI uri, HttpHeaders incoming, String fallbackType) {
         if (egressProbe != null && !egressProbe.isAvailable()) {
             return Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,

@@ -77,6 +77,20 @@ class ArchivePlaybackService {
                 }).subscribeOn(Schedulers.boundedElastic()));
     }
 
+    Mono<ResponseEntity<FileSystemResource>> archivedPlaylistThumbnail(String playlistId) {
+        return Mono.fromCallable(() -> {
+            Path file = archiveRoot.resolve("playlists").resolve(playlistId).resolve("thumbnail").normalize();
+            if (!file.startsWith(archiveRoot)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Playlist thumbnail not found");
+            }
+            if (!Files.isRegularFile(file)) {
+                return null;
+            }
+            return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).contentLength(Files.size(file))
+                    .cacheControl(CacheControl.maxAge(Duration.ofDays(1))).body(new FileSystemResource(file));
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
     private void prepare(ArchivedVideo video, String playbackSession, String versionId) throws Exception {
         if (!video.videoId().matches("[A-Za-z0-9_-]{11}")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid videoId");

@@ -164,6 +164,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/user-playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2UserPlaylists"];
+        put?: never;
+        post: operations["createStage2UserPlaylist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/user-playlists/{playlistId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2UserPlaylist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/user-playlists/{playlistId}/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["addStage2UserPlaylistVideo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/progress": {
         parameters: {
             query?: never;
@@ -731,6 +779,10 @@ export interface components {
             /** Format: int64 */
             durationSeconds?: number | null;
             videoCount?: number | null;
+            /** Format: int64 */
+            viewCount?: number | null;
+            /** @description Publication date or ISO timestamp when available */
+            publishedAt?: string | null;
         };
         SearchResults: {
             items: components["schemas"]["SearchItem"][];
@@ -784,6 +836,26 @@ export interface components {
             title: string;
             /** Format: int64 */
             videoCount: number;
+            /** @description archived playlist thumbnail URL; 404 triggers the 2x2 video collage */
+            thumbnailUrl: string;
+            videoIds: string[];
+        };
+        UserPlaylist: {
+            /** Format: uuid */
+            playlistId: string;
+            title: string;
+            ownerUsername: string;
+            /** Format: int64 */
+            videoCount: number;
+            videoIds: string[];
+        };
+        CreateUserPlaylistRequest: {
+            title: string;
+            /** @description Optional video to add immediately; does not start archiving */
+            videoId?: string | null;
+        };
+        AddVideoRequest: {
+            videoId: string;
         };
         LibraryLocation: {
             videoId: string;
@@ -1256,6 +1328,96 @@ export interface operations {
                 content: {
                     "text/event-stream": string;
                 };
+            };
+        };
+    };
+    getStage2UserPlaylists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's internal playlists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPlaylist"][];
+                };
+            };
+        };
+    };
+    createStage2UserPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUserPlaylistRequest"];
+            };
+        };
+        responses: {
+            /** @description Created playlist; optional initial video is included without starting an archive job */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPlaylist"];
+                };
+            };
+        };
+    };
+    getStage2UserPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Shared internal playlist readable by any authenticated user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPlaylist"];
+                };
+            };
+        };
+    };
+    addStage2UserPlaylistVideo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddVideoRequest"];
+            };
+        };
+        responses: {
+            /** @description Video added by playlist owner; no archive job is created */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

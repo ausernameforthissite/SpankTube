@@ -51,7 +51,7 @@ export function animalAvatar(username: string): string {
 
   const animal = animals[hash % animals.length];
   const background = backgrounds[(hash >>> 4) % backgrounds.length];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><title>${animal}</title><g transform="scale(0.5333333333333333)"><rect x="6" y="6" width="228" height="228" rx="52" fill="${background}"/>${illustrations[animal]}</g></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><title>${animal}</title><g transform="scale(0.5333333333333333)"><rect x="0" y="0" width="240" height="240" fill="${background}"/>${illustrations[animal]}</g></svg>`;
 
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

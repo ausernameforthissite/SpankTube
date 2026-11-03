@@ -33,7 +33,7 @@ class GatewaySecurityConfiguration {
                                 "/actuator/health").permitAll()
                         .pathMatchers(org.springframework.http.HttpMethod.GET,
                                 "/media/v/*/thumbnail", "/media/channel/*/avatar", "/media/playlist/*/thumbnail",
-                                "/media/image").permitAll()
+                                "/media/playlist/*/archive-thumbnail", "/media/image").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();

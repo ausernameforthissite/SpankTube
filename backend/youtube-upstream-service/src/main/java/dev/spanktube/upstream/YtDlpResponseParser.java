@@ -149,8 +149,12 @@ class YtDlpResponseParser {
         if (videoCount == null) {
             videoCount = intValue(entry, "playlist_count");
         }
+        String publishedAt = entry.path("timestamp").isNumber()
+                ? java.time.Instant.ofEpochSecond(entry.path("timestamp").asLong()).toString()
+                : text(entry, "upload_date");
         return new SearchItem(kind, id, title, url, thumbnail,
-                firstText(entry, "channel", "uploader"), longValue(entry, "duration"), videoCount);
+                firstText(entry, "channel", "uploader"), longValue(entry, "duration"), videoCount,
+                longValue(entry, "view_count"), publishedAt);
     }
 
     private static String entryKind(JsonNode entry) {

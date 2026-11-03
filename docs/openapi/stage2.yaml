@@ -149,6 +149,54 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+  /api/v1/library/user-playlists:
+    get:
+      operationId: getStage2UserPlaylists
+      responses:
+        '200':
+          description: Current user's internal playlists
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserPlaylist' }
+    post:
+      operationId: createStage2UserPlaylist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserPlaylistRequest' }
+      responses:
+        '201':
+          description: Created playlist; optional initial video is included without starting an archive job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPlaylist' }
+  /api/v1/library/user-playlists/{playlistId}:
+    get:
+      operationId: getStage2UserPlaylist
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      responses:
+        '200':
+          description: Shared internal playlist readable by any authenticated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPlaylist' }
+  /api/v1/library/user-playlists/{playlistId}/videos:
+    post:
+      operationId: addStage2UserPlaylistVideo
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddVideoRequest' }
+      responses:
+        '204':
+          description: Video added by playlist owner; no archive job is created
   /api/v1/library/progress:
     get:
       operationId: getStage2WatchProgress
@@ -765,6 +813,8 @@ components:
         channelName: { type: [string, 'null'] }
         durationSeconds: { type: [integer, 'null'], format: int64 }
         videoCount: { type: [integer, 'null'] }
+        viewCount: { type: [integer, 'null'], format: int64 }
+        publishedAt: { type: [string, 'null'], description: Publication date or ISO timestamp when available }
     SearchResults:
       type: object
       required: [items]
@@ -818,11 +868,37 @@ components:
         totalBytes: { type: integer, format: int64 }
     LibraryPlaylist:
       type: object
-      required: [playlistId, title, videoCount]
+      required: [playlistId, title, videoCount, thumbnailUrl, videoIds]
       properties:
         playlistId: { type: string }
         title: { type: string }
         videoCount: { type: integer, format: int64 }
+        thumbnailUrl: { type: string, description: archived playlist thumbnail URL; 404 triggers the 2x2 video collage }
+        videoIds:
+          type: array
+          items: { type: string }
+    UserPlaylist:
+      type: object
+      required: [playlistId, title, ownerUsername, videoCount, videoIds]
+      properties:
+        playlistId: { type: string, format: uuid }
+        title: { type: string, maxLength: 200 }
+        ownerUsername: { type: string }
+        videoCount: { type: integer, format: int64 }
+        videoIds:
+          type: array
+          items: { type: string }
+    CreateUserPlaylistRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        videoId: { type: [string, 'null'], description: Optional video to add immediately; does not start archiving }
+    AddVideoRequest:
+      type: object
+      required: [videoId]
+      properties:
+        videoId: { type: string }
     LibraryLocation:
       type: object
       required: [videoId, channelId, playlistId]

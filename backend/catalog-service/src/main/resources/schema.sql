@@ -89,3 +89,20 @@ create table if not exists library_playlist_items (
 
 create index if not exists library_playlists_channel_idx on library_playlists(user_id, channel_id);
 create index if not exists library_playlist_items_video_idx on library_playlist_items(user_id, video_id);
+
+create table if not exists user_playlists (
+    id uuid primary key,
+    owner_username text not null,
+    title text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists user_playlist_items (
+    playlist_id uuid not null references user_playlists(id) on delete cascade,
+    video_id text not null,
+    added_at timestamptz not null default now(),
+    primary key (playlist_id, video_id)
+);
+
+create index if not exists user_playlists_owner_idx on user_playlists(owner_username, updated_at desc);

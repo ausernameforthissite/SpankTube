@@ -186,14 +186,54 @@ class CatalogRepository {
                 request.username(), request.playlistId(), videoId));
     }
 
+    List<LibraryModels.UserPlaylist> userPlaylists(String ownerUsername) {
+        String sql = "select p.id, p.title, p.owner_username, count(i.video_id) as video_count, "
+                + "coalesce(array_agg(i.video_id order by i.added_at), '{}') as video_ids from user_playlists p "
+                + "left join user_playlist_items i on i.playlist_id = p.id where p.owner_username = ? "
+                + "group by p.id, p.title, p.owner_username, p.updated_at order by p.updated_at desc";
+        return jdbc.query(sql, this::mapUserPlaylist, ownerUsername);
+    }
+
+    java.util.Optional<LibraryModels.UserPlaylist> userPlaylist(String playlistId) {
+        String sql = "select p.id, p.title, p.owner_username, count(i.video_id) as video_count, "
+                + "coalesce(array_agg(i.video_id order by i.added_at), '{}') as video_ids from user_playlists p "
+                + "left join user_playlist_items i on i.playlist_id = p.id where p.id = ?::uuid "
+                + "group by p.id, p.title, p.owner_username";
+        return jdbc.query(sql, this::mapUserPlaylist, playlistId).stream().findFirst();
+    }
+
+    void createUserPlaylist(String playlistId, String ownerUsername, String title, String videoId) {
+        jdbc.update("insert into user_playlists(id, owner_username, title) values (?::uuid, ?, ?)",
+                playlistId, ownerUsername, title);
+        if (videoId != null && !videoId.isBlank()) {
+            addUserVideo(playlistId, videoId);
+        }
+    }
+
+    void addUserVideo(String playlistId, String videoId) {
+        jdbc.update("insert into user_playlist_items(playlist_id, video_id) values (?::uuid, ?) on conflict do nothing",
+                playlistId, videoId);
+        jdbc.update("update user_playlists set updated_at = now() where id = ?::uuid", playlistId);
+    }
+
+    private LibraryModels.UserPlaylist mapUserPlaylist(ResultSet rs, int rowNum) throws SQLException {
+        return new LibraryModels.UserPlaylist(rs.getString("id"), rs.getString("title"), rs.getString("owner_username"),
+                rs.getLong("video_count"), List.of((String[]) rs.getArray("video_ids").getArray()));
+    }
+
     List<LibraryModels.LibraryPlaylist> playlists(String username, String channelId) {
-        String sql = "select lp.playlist_id, lp.title, count(distinct lpi.video_id) from library_playlists lp "
+        String sql = "select lp.playlist_id, lp.title, count(distinct lpi.video_id), "
+                + "('/media/playlist/' || lp.playlist_id || '/archive-thumbnail') as thumbnail_url, "
+                + "array_agg(distinct lpi.video_id) as video_ids from library_playlists lp "
                 + "left join library_playlist_items lpi on lpi.user_id = lp.user_id and lpi.playlist_id = lp.playlist_id "
                 + "where lp.channel_id = ?" + (username == null ? "" : " and lp.user_id = ?")
                 + " group by lp.playlist_id, lp.title order by lp.title";
         Object[] parameters = username == null ? new Object[] { channelId } : new Object[] { channelId, username };
-        return jdbc.query(sql, parameters, (rs, rowNum) -> new LibraryModels.LibraryPlaylist(
-                rs.getString("playlist_id"), rs.getString("title"), rs.getLong(3)));
+        return jdbc.query(sql, parameters, (rs, rowNum) -> {
+            java.sql.Array ids = rs.getArray("video_ids");
+            return new LibraryModels.LibraryPlaylist(rs.getString("playlist_id"), rs.getString("title"), rs.getLong(3),
+                    rs.getString("thumbnail_url"), ids == null ? List.of() : List.of((String[]) ids.getArray()));
+        });
     }
 
     List<LibraryModels.Video> playlistVideos(String username, String playlistId) {

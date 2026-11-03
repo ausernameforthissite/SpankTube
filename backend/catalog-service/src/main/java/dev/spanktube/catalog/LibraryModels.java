@@ -34,7 +34,16 @@ final class LibraryModels {
             String channelUrl, String channelAvatarUrl, String downloadUrl, String filename, boolean current) {
     }
 
-    record LibraryPlaylist(String playlistId, String title, long videoCount) {
+    record LibraryPlaylist(String playlistId, String title, long videoCount, String thumbnailUrl, List<String> videoIds) {
+    }
+
+    record UserPlaylist(String playlistId, String title, String ownerUsername, long videoCount, List<String> videoIds) {
+    }
+
+    record CreateUserPlaylistRequest(String title, String videoId) {
+    }
+
+    record AddVideoRequest(String videoId) {
     }
 
     record LibraryLocation(String videoId, String channelId, String playlistId) {

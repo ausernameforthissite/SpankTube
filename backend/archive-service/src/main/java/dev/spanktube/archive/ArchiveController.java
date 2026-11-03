@@ -29,14 +29,16 @@ class ArchiveController {
     private final CatalogClient catalogClient;
     private final ArchiveEvents events;
     private final ArchiveProperties properties;
+    private final PlaylistThumbnailService playlistThumbnails;
 
     ArchiveController(ArchiveJobService jobs, UpstreamClient upstreamClient, CatalogClient catalogClient,
-            ArchiveEvents events, ArchiveProperties properties) {
+            ArchiveEvents events, ArchiveProperties properties, PlaylistThumbnailService playlistThumbnails) {
         this.jobs = jobs;
         this.upstreamClient = upstreamClient;
         this.catalogClient = catalogClient;
         this.events = events;
         this.properties = properties;
+        this.playlistThumbnails = playlistThumbnails;
     }
 
     @PostMapping("/api/v1/videos/{videoId}/save")
@@ -64,6 +66,7 @@ class ArchiveController {
     @PostMapping("/api/v1/playlists/{playlistId}/save")
     ResponseEntity<ArchiveModels.Job> savePlaylist(@PathVariable String playlistId, HttpServletRequest request) {
         UpstreamClient.PlaylistArchive playlist = upstreamClient.playlistArchive(playlistId);
+        playlistThumbnails.save(playlistId, playlist.thumbnailUrl());
         catalogClient.registerPlaylist(username(request), playlistId, playlist.title(), playlist.channelId(), playlist.videoIds());
         return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, playlist.videoIds(), request);
     }

@@ -99,7 +99,7 @@ export type LibraryChannelInfo = {
   subscriberCount: number | null;
 };
 
-export type LibraryPlaylist = { playlistId: string; title: string; videoCount: number };
+export type LibraryPlaylist = { playlistId: string; title: string; videoCount: number; thumbnailUrl: string; videoIds: string[] };
 
 export type LibraryChannel = {
   channel: LibraryChannelInfo;
@@ -114,6 +114,8 @@ export type LibraryResponse = {
   quotaBytes: number;
   lruThresholdPercent: number;
 };
+
+export type UserPlaylist = { playlistId: string; title: string; ownerUsername: string; videoCount: number; videoIds: string[] };
 
 export type LibraryLocation = { videoId: string; channelId: string; playlistId: string | null };
 

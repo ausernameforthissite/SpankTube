@@ -207,7 +207,9 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
                 return null;
             }
             return new SearchItem("video", id, stream.getName(), "/watch?v=" + id,
-                    "/media/v/" + id + "/thumbnail", stream.getUploaderName(), number(stream.getDuration()), null);
+                    "/media/v/" + id + "/thumbnail", stream.getUploaderName(), number(stream.getDuration()), null,
+                    number(stream.getViewCount()), stream.getUploadDate() == null ? null
+                            : stream.getUploadDate().getInstant().toString());
         }
         if (info instanceof ChannelInfoItem channel) {
             String id = channelId(channel.getUrl());
@@ -218,7 +220,7 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
             String fallback = "/media/channel/" + id + "/avatar";
             return new SearchItem("channel", id, channel.getName(), route,
                     MediaLinks.thumbnail(bestImage(channel.getThumbnails()), fallback), null, null,
-                    count(channel.getStreamCount()));
+                    count(channel.getStreamCount()), null, null);
         }
         if (info instanceof PlaylistInfoItem playlist) {
             String id = queryParameter(playlist.getUrl(), "list");
@@ -228,7 +230,7 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
             String fallback = "/media/playlist/" + id + "/thumbnail";
             return new SearchItem("playlist", id, playlist.getName(), "/playlist?list=" + id,
                     MediaLinks.thumbnail(bestImage(playlist.getThumbnails()), fallback), playlist.getUploaderName(),
-                    null, count(playlist.getStreamCount()));
+                    null, count(playlist.getStreamCount()), null, null);
         }
         return null;
     }

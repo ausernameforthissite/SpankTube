@@ -87,6 +87,8 @@ video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .playback-status { min-width: 0; }
 .metadata h2 { margin: 0 0 8px; line-height: 1.25; }
 .channel { color: #bbc5d4; font-weight: 600; }
+.channel-title-link { color: inherit; text-decoration: none; }
+.channel-title-link:hover { text-decoration: underline; }
 .stats { color: #939cac; }
 .description { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; max-height: 260px; overflow: auto; }
 details { margin-top: 20px; }
@@ -122,6 +124,26 @@ code { color: #d9e3ff; }
 .result-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #0a0c11; }
 .result-thumbnail { position: relative; aspect-ratio: 16 / 9; }
 .result-card strong, .result-card .muted, .result-kind { padding: 0 10px; }
+.result-thumbnail-link { position: relative; display: block; width: 100%; height: 100%; color: inherit; text-decoration: none; }
+.result-duration-overlay { position: absolute; right: 6px; bottom: 6px; padding: 2px 5px; border-radius: 4px; color: #fff; background: #000c; font-size: 0.75rem; line-height: 1.2; }
+.result-card-title-row { display: flex; align-items: flex-start; gap: 4px; padding: 0 10px; }
+.result-card-title-row strong { padding: 0; }
+.result-title-link { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.result-title-link:hover { text-decoration: underline; }
+.card-menu-button { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; color: #bbc5d4; background: transparent; border-radius: 50%; font-size: 1.25rem; line-height: 1; }
+.card-menu-button:hover { background: #303745; }
+.card-context-menu { display: grid; gap: 4px; }
+.card-context-menu button { padding: 10px; color: #e7ecf5; background: transparent; border-radius: 6px; text-align: left; }
+.card-context-menu button:hover { background: #303745; }
+.playlist-picker, .playlist-create-dialog { display: grid; gap: 12px; }
+.playlist-picker .popup-header strong, .playlist-create-dialog .popup-header strong { flex: 1; text-align: left; }
+.playlist-picker-list { display: grid; max-height: 45vh; gap: 6px; overflow-y: auto; }
+.playlist-picker-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; color: #e7ecf5; background: #202838; text-align: left; }
+.playlist-picker-item strong, .playlist-picker-item .muted { display: block; }
+.playlist-picker-item .muted { font-size: 0.8rem; }
+.playlist-create-button { justify-self: stretch; }
+.playlist-create-dialog label { display: grid; gap: 6px; }
+.playlist-create-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .result-card .muted { padding-bottom: 10px; font-size: 0.88rem; }
 .result-kind { padding-top: 8px; color: #9cb4ff; font-size: 0.75rem; text-transform: uppercase; }
 .result-kind-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 0; }
@@ -135,6 +157,14 @@ code { color: #d9e3ff; }
 .watch-progress::-moz-progress-bar { background: #d40000; }
 .library-collection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 16px; }
 .library-collection-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; color: #e7ecf5; background: #171a22; border: 1px solid #29303d; border-radius: 10px; text-align: left; }
+.library-playlist-card { padding: 0; overflow: hidden; }
+.library-playlist-card strong, .library-playlist-card .muted { display: block; padding: 0 10px; }
+.library-playlist-card strong { padding-top: 10px; }
+.library-playlist-card .muted { padding-bottom: 10px; }
+.library-playlist-thumbnail, .library-playlist-collage { display: block; width: 100%; aspect-ratio: 16 / 9; background: #0a0c11; }
+.library-playlist-thumbnail { object-fit: cover; }
+.library-playlist-collage { display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); overflow: hidden; }
+.library-playlist-collage img, .library-playlist-collage span { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; }
 .library-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .library-row, .job-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 0; border-bottom: 1px solid #29303d; }
 .library-row:last-child, .job-row:last-child { border-bottom: 0; }

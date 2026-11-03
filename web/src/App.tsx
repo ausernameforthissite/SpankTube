@@ -9,12 +9,13 @@ import { LibraryView } from "./LibraryView";
 import { Pagination } from "./Pagination";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackLog } from "./PlaybackLog";
+import { CardContextMenu, PlaylistCreateDialog, PlaylistPicker } from "./PlaylistMenus";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
 import { UserMenu } from "./UserMenu";
 import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
-import type { ApiFetch, ArchiveAvailability, ArchiveVersion, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
+import type { ApiFetch, ArchiveAvailability, ArchiveVersion, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserPlaylist, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -48,6 +49,8 @@ type SearchItem = {
   channelName: string | null;
   durationSeconds: number | null;
   videoCount: number | null;
+  publishedAt?: string | null;
+  viewCount?: number | null;
 };
 type SearchResults = { items: SearchItem[]; nextCursor: string | null };
 type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
@@ -70,7 +73,7 @@ type UserQuota = {
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
 };
-type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | null;
+type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | "cardMenu" | "playlistPicker" | "playlistCreate" | null;
 
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -183,10 +186,15 @@ function youtubeVideoId(input: string): string | null {
   }
 }
 
+function internalPlaylistId(value: string | null): boolean {
+  return value !== null && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
 function videoSearchItem(video: Video): SearchItem {
   return { kind: "video", id: video.videoId, title: video.title, url: `/watch?v=${video.videoId}`,
     thumbnailUrl: video.thumbnailUrl || `/media/v/${video.videoId}/thumbnail`, channelName: video.channelName,
-    durationSeconds: video.durationSeconds ?? null, videoCount: null };
+    durationSeconds: video.durationSeconds ?? null, videoCount: null,
+    publishedAt: video.publishedAt, viewCount: video.viewCount };
 }
 
 function readLocation() {
@@ -230,6 +238,12 @@ export default function App() {
   const [channelTab, setChannelTab] = useState<"videos" | "playlists">(
     location.query.get("tab") === "playlists" ? "playlists" : "videos");
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
+  const [userPlaylistDetails, setUserPlaylistDetails] = useState<UserPlaylist | null>(null);
+  const [userPlaylists, setUserPlaylists] = useState<UserPlaylist[]>([]);
+  const [menuVideo, setMenuVideo] = useState<SearchItem | null>(null);
+  const [playlistTitle, setPlaylistTitle] = useState("");
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   const pageCursors = useRef<Record<string, Record<number, string | null>>>({});
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
@@ -497,6 +511,11 @@ export default function App() {
     setQuotaDrafts(Object.fromEntries(data.map(user => [user.username, String(Math.round(user.effectiveQuotaBytes / 1024 / 1024 / 1024))])));
   }, [apiFetch]);
 
+  const loadUserPlaylists = useCallback(async () => {
+    const response = await apiFetch("/api/v1/library/user-playlists");
+    setUserPlaylists(await response.json() as UserPlaylist[]);
+  }, [apiFetch]);
+
   useEffect(() => {
     if (!session) {
       setSettingsLoaded(false);
@@ -614,6 +633,17 @@ export default function App() {
     setPopup(current => current === name ? null : name);
   }, []);
 
+  const openCardMenu = useCallback((item: SearchItem, anchor: HTMLElement) => {
+    setMenuVideo(item);
+    togglePopup("cardMenu", anchor);
+  }, [togglePopup]);
+
+  const openPlaylistPicker = useCallback(() => {
+    setPlaylistQuery("");
+    setPopup("playlistPicker");
+    loadUserPlaylists().catch(showError);
+  }, [loadUserPlaylists, showError]);
+
   const updatePopupPosition = useCallback(() => {
     const element = popupWindowRef.current;
     const anchor = popupAnchorRef.current;
@@ -678,6 +708,7 @@ export default function App() {
     historySelectionRef.current = false;
     setChannel(null);
     setPlaylist(null);
+    setUserPlaylistDetails(null);
     setResults([]);
     setPlayerReady(false);
     setMediaReady(false);
@@ -706,6 +737,31 @@ export default function App() {
         }
       } else if (path === "/playlist") {
         const id = query.get("list") || "";
+        if (internalPlaylistId(id)) {
+          const response = await apiFetch(`/api/v1/library/user-playlists/${id}`);
+          const details = await response.json() as UserPlaylist;
+          setUserPlaylistDetails(details);
+          const entries = await Promise.all(details.videoIds.map(async videoId => {
+            const [metadata, archive] = await Promise.allSettled([
+              apiFetch(`/api/v1/videos/${videoId}?logSession=${encodeURIComponent(metadataSession)}`)
+                .then(response => response.json() as Promise<Video>),
+              apiFetch(`/api/v1/videos/${videoId}/archive`).then(response => response.json() as Promise<ArchiveAvailability>),
+            ]);
+            if (metadata.status === "fulfilled") return { item: videoSearchItem(metadata.value), reason: null, archived: false };
+            const version = archive.status === "fulfilled" && archive.value.archived ? archive.value.version : null;
+            return { item: version ? videoSearchItem(archiveVideo(version)) : null, reason: metadata.reason, archived: version !== null };
+          }));
+          setResults(entries.flatMap(entry => entry.item ? [entry.item] : []));
+          const failed = entries.filter(entry => entry.reason !== null);
+          if (failed.length > 0) {
+            const reason = failed[0].reason;
+            if (reason instanceof RequestError) setActions(reason.actions);
+            const explanation = reason instanceof Error ? reason.message : String(reason);
+            const archived = failed.some(entry => entry.archived) ? " Для архивных роликов показаны сохранённые метаданные." : "";
+            setError(`Не удалось загрузить метаданные YouTube: ${failed.length}.${archived} ${explanation}`);
+          }
+          return;
+        }
         const cursor = currentPage === 1 ? null : query.get("cursor");
         const params = new URLSearchParams({ logSession: metadataSession });
         if (cursor) params.set("cursor", cursor);
@@ -778,12 +834,14 @@ export default function App() {
         }
       } else if (path === "/library" || path === "/") {
         await loadLibrary();
+      } else if (path === "/user-playlists") {
+        await loadUserPlaylists();
       } else if (path === "/admin") {
         await loadUsers();
       }
     };
     load().catch(showError).finally(() => setLoading(false));
-  }, [location, authenticated, apiFetch, loadLibrary, loadUsers, showError, applyArchive,
+  }, [location, authenticated, apiFetch, loadLibrary, loadUsers, loadUserPlaylists, showError, applyArchive,
     metadataSession, currentPage, metadataKey, rememberPage]);
 
   useEffect(() => {
@@ -946,11 +1004,10 @@ export default function App() {
     }
   }, [downloadBlob, showError]);
 
-  const archive = async () => {
-    if (!video) return;
+  const archiveById = async (videoId: string) => {
     setError(null);
     try {
-      const response = await apiFetch(`/api/v1/videos/${video.videoId}/save`, { method: "POST" });
+      const response = await apiFetch(`/api/v1/videos/${videoId}/save`, { method: "POST" });
       const job = await response.json() as QueueJob;
       if (job.status === "completed") notify("Видео уже заархивировано");
       else if (response.status === 202) notify("Архивация поставлена в очередь");
@@ -960,11 +1017,15 @@ export default function App() {
     }
   };
 
-  const download = async (options: DownloadOptions) => {
-    if (!video) return;
+  const archive = async () => {
+    if (video) await archiveById(video.videoId);
+  };
+
+  const download = async (options: DownloadOptions, videoId = video?.videoId) => {
+    if (!videoId) return;
     setError(null);
     try {
-      const response = await apiFetch(`/api/v1/videos/${video.videoId}/download`, {
+      const response = await apiFetch(`/api/v1/videos/${videoId}/download`, {
         method: "POST",
         body: JSON.stringify(options),
       });
@@ -1025,6 +1086,53 @@ export default function App() {
       showError(reason);
     }
   };
+
+  const createPlaylist = async () => {
+    if (creatingPlaylist || !playlistTitle.trim()) return;
+    setCreatingPlaylist(true);
+    setError(null);
+    try {
+      const response = await apiFetch("/api/v1/library/user-playlists", {
+        method: "POST",
+        body: JSON.stringify({ title: playlistTitle.trim(), videoId: menuVideo?.id || null }),
+      });
+      const created = await response.json() as UserPlaylist;
+      setUserPlaylists(current => [created, ...current]);
+      setPlaylistTitle("");
+      setPopup(null);
+      notify(menuVideo ? `Видео добавлено в «${created.title}»` : `Плейлист «${created.title}» создан`);
+    } catch (reason) {
+      showError(reason);
+    } finally {
+      setCreatingPlaylist(false);
+    }
+  };
+
+  const addToPlaylist = async (playlist: UserPlaylist) => {
+    if (!menuVideo) return;
+    setError(null);
+    try {
+      await apiFetch(`/api/v1/library/user-playlists/${playlist.playlistId}/videos`, {
+        method: "POST", body: JSON.stringify({ videoId: menuVideo.id }),
+      });
+      setUserPlaylists(current => current.map(item => item.playlistId === playlist.playlistId && !item.videoIds.includes(menuVideo.id)
+        ? { ...item, videoCount: item.videoCount + 1, videoIds: [...item.videoIds, menuVideo.id] } : item));
+      setPopup(null);
+      notify(`Видео добавлено в «${playlist.title}»`);
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
+  const sharePlaylist = useCallback((playlistId: string) => {
+    const url = `${window.location.origin}/playlist?list=${encodeURIComponent(playlistId)}`;
+    const fallback = () => window.prompt("Ссылка на плейлист", url);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => notify("Ссылка скопирована")).catch(fallback);
+    } else {
+      fallback();
+    }
+  }, [notify]);
 
   const openHistory = async (anchor: HTMLElement) => {
     if (!watchId) return;
@@ -1269,7 +1377,7 @@ export default function App() {
 
       {location.path === "/search" && <>
         {searchMessage && <p className="muted" role="status">{searchMessage}</p>}
-        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
+        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
         {searchNextCursor && <button className="secondary" disabled={loading} onClick={() => navigate(`/search?q=${encodeURIComponent(searchQuery)}&type=${searchType}&cursor=${encodeURIComponent(searchNextCursor)}`)}>Следующая страница</button>}
       </>}
 
@@ -1362,6 +1470,30 @@ export default function App() {
         </article>
       )}
 
+      {location.path === "/playlist" && userPlaylistDetails && <section className="panel metadata">
+        <div className="playlist-heading"><h2>{userPlaylistDetails.title}</h2>
+          <button className="secondary" onClick={() => sharePlaylist(userPlaylistDetails.playlistId)}>Поделиться</button>
+        </div>
+        <p className="muted">Ограниченный доступ</p>
+        <ResultGrid items={results} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
+        <button className="secondary" onClick={() => navigate("/user-playlists")}>К моим плейлистам</button>
+      </section>}
+
+      {location.path === "/user-playlists" && <section className="panel metadata">
+        <div className="playlist-heading"><h2>Мои плейлисты</h2>
+          <button className="secondary" onClick={() => { setMenuVideo(null); setPlaylistTitle(""); setPopup("playlistCreate"); }}>Создать плейлист</button>
+        </div>
+        {userPlaylists.length === 0 && <p className="muted">Плейлистов пока нет</p>}
+        {userPlaylists.map(playlist => <div className="library-row" key={playlist.playlistId}>
+          <a className="queue-video-link" href={`/playlist?list=${playlist.playlistId}`}
+            onClick={event => { event.preventDefault(); navigate(`/playlist?list=${playlist.playlistId}`); }}>
+            <strong>{playlist.title}</strong>
+            <div className="muted">Ограниченный доступ · {playlist.videoCount} видео</div>
+          </a>
+          <button className="secondary" onClick={() => sharePlaylist(playlist.playlistId)}>Поделиться</button>
+        </div>)}
+      </section>}
+
       {location.path === "/playlist" && playlist && (
         <section className="panel metadata">
           <div className="playlist-channel-line">
@@ -1374,7 +1506,7 @@ export default function App() {
           <div className="playlist-heading"><h2>{playlist.title}</h2>
             <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать</button>
           </div>
-          <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
+          <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
           <Pagination page={currentPage} totalPages={playlist.totalPages} hasNext={Boolean(playlist.nextCursor)}
             loading={loading} canOpen={canOpenPage} onOpen={openPage} />
         </section>
@@ -1396,10 +1528,10 @@ export default function App() {
               aria-selected={channelTab === "playlists"} onClick={() => selectChannelTab("playlists")}>Плейлисты</button>
           </div>
           {channelTab === "videos" ? <>
-            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />
+            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
             <Pagination page={currentPage} totalPages={channel.totalPages} hasNext={Boolean(channel.nextCursor)}
               loading={loading} canOpen={canOpenPage} onOpen={openPage} />
-          </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} />}
+          </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />}
         </section>
       )}
 
@@ -1436,6 +1568,15 @@ export default function App() {
             if (url === "/settings") setPopup("settings");
             else navigate(url);
           }} />}
+        {popup === "cardMenu" && menuVideo && <CardContextMenu
+          onAdd={openPlaylistPicker}
+          onArchive={() => { setPopup(null); void archiveById(menuVideo.id); }}
+          onDownload={() => { setPopup(null); void download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true }, menuVideo.id); }} />}
+        {popup === "playlistPicker" && <PlaylistPicker playlists={userPlaylists} query={playlistQuery}
+          onQuery={setPlaylistQuery} onSelect={playlist => void addToPlaylist(playlist)}
+          onCreate={() => setPopup("playlistCreate")} onClose={() => setPopup(null)} />}
+        {popup === "playlistCreate" && <PlaylistCreateDialog title={playlistTitle} onTitle={setPlaylistTitle}
+          onCreate={() => void createPlaylist()} onCancel={() => setPopup(null)} creating={creatingPlaylist} />}
         {popup === "history" && <HistoryMenu versions={historyVersions} onSelect={selectHistory} onClose={() => setPopup(null)} />}
         {popup === "playbackLog" && <section className="playback-log-options" aria-label="Журнал подготовки видео">
           <div className="popup-header"><button className="popup-close" aria-label="Закрыть журнал" onClick={() => setPopup(null)}>×</button></div>
@@ -1458,20 +1599,27 @@ function withPlaylistOrigin(item: SearchItem): string {
   return `${item.url}&from=${encodeURIComponent(from)}`;
 }
 
-function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveOpen }: {
+function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveOpen, onMenu }: {
   items: SearchItem[];
   navigate: (url: string) => void;
   progressMap: WatchProgressMap;
   archiveLocations: Record<string, LibraryLocation>;
   onArchiveOpen: (videoId: string) => void;
+  onMenu: (item: SearchItem, anchor: HTMLElement) => void;
 }) {
   return (
     <div className="result-grid">
-      {items.map(item => (
-        <button className="result-card" key={`${item.kind}:${item.id}`} data-nav-url={withPlaylistOrigin(item)}
-          onClick={() => navigate(withPlaylistOrigin(item))}>
+      {items.map(item => {
+        const url = withPlaylistOrigin(item);
+        const metadata = [item.viewCount != null ? `${formatViews(item.viewCount)} просмотров` : null,
+          item.publishedAt ? relativeDate(item.publishedAt) : null].filter(Boolean).join(" · ");
+        return <article className="result-card" key={`${item.kind}:${item.id}`} data-nav-url={url}>
           <div className="result-thumbnail">
-            {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
+            <a className="result-thumbnail-link" href={url} onClick={event => { event.preventDefault(); navigate(url); }}>
+              {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
+              {item.kind === "video" && item.durationSeconds != null
+                && <span className="result-duration-overlay">{formatDuration(item.durationSeconds)}</span>}
+            </a>
             <WatchProgressBar progress={progressMap[item.id]} />
             {archiveLocations[item.id] && <span className="archive-badge" role="button" tabIndex={0}
               aria-label="Открыть видео в архиве" title="В архиве"
@@ -1486,11 +1634,35 @@ function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveO
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM3 3h18v4H3zm5 8h8" /></svg>
             </span>}
           </div>
-          <div className="result-kind-row"><span className="result-kind">{item.kind}</span>{item.durationSeconds != null && <span className="result-duration">{formatDuration(item.durationSeconds)}</span>}</div>
-          <strong>{item.title}</strong>
+          <div className="result-card-title-row">
+            <a className="result-title-link" href={url} onClick={event => { event.preventDefault(); navigate(url); }}>
+              <strong>{item.title}</strong>
+            </a>
+            {item.kind === "video" && <button className="card-menu-button" aria-label={`Действия с видео ${item.title}`}
+              title="Действия с видео" onClick={event => onMenu(item, event.currentTarget)}>⋮</button>}
+          </div>
           <span className="muted">{item.channelName || ""}{item.videoCount != null ? ` · ${item.videoCount} видео` : ""}</span>
-        </button>
-      ))}
+          {metadata && <span className="muted">{metadata}</span>}
+        </article>;
+      })}
     </div>
   );
+}
+
+function formatViews(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1).replace(".", ",")} млн`;
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 100_000 ? 0 : 1).replace(".", ",")} тыс.`;
+  return String(value);
+}
+
+function relativeDate(value: string): string {
+  const normalized = /^\d{8}$/.test(value)
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : value;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "";
+  const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / 86_400_000));
+  if (days < 1) return "сегодня";
+  if (days < 30) return `${days} дн. назад`;
+  if (days < 365) return `${Math.floor(days / 30)} мес. назад`;
+  return `${Math.floor(days / 365)} г. назад`;
 }

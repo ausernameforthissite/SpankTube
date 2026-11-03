@@ -8,5 +8,7 @@ public record SearchItem(
         String thumbnailUrl,
         String channelName,
         Long durationSeconds,
-        Integer videoCount) {
+        Integer videoCount,
+        Long viewCount,
+        String publishedAt) {
 }

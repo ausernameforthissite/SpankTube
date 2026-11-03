@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { ApiFetch, LibraryItem, LibraryResponse, WatchProgressMap } from "./types";
+import { useEffect, useMemo, useState } from "react";
+import type { ApiFetch, LibraryItem, LibraryPlaylist, LibraryResponse, WatchProgressMap } from "./types";
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -118,19 +118,24 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
       </div>
       <div className="channel-line">
         <img className="avatar" src={selectedChannel.channel.avatarUrl} alt="" />
-        <h2>{selectedChannel.channel.title}</h2>
+        <h2><a className="channel-title-link" href={selectedChannel.channel.url}
+          onClick={event => { event.preventDefault(); navigate(selectedChannel.channel.url); }}>
+          {selectedChannel.channel.title}
+        </a></h2>
       </div>
-      {selectedChannel.playlists.length > 0 && <div className="library-collection-grid">
-        {selectedChannel.playlists.map(playlist => <button className="library-collection-card" key={playlist.playlistId}
+      <div className="library-collection-grid">
+        {selectedChannel.playlists.map(playlist => <button className="library-collection-card library-playlist-card" key={playlist.playlistId}
           data-nav-url={`/library?scope=${scope}&channel=${channelId}&playlist=${playlist.playlistId}`}
           onClick={() => openPath(channelId, playlist.playlistId, null)}>
+          <PlaylistArtwork playlist={playlist} videos={selectedChannel.videos} />
           <strong>{playlist.title}</strong><span className="muted">{playlist.videoCount} видео</span>
         </button>)}
-      </div>}
-      <button className="library-collection-card" data-nav-url={`/library?scope=${scope}&channel=${channelId}&playlist=none`}
-        onClick={() => openPath(channelId, "none", null)}>
-        <strong>Видео без плейлиста</strong><span className="muted">{selectedChannel.videos.length} видео</span>
-      </button>
+        <button className="library-collection-card library-playlist-card" data-nav-url={`/library?scope=${scope}&channel=${channelId}&playlist=none`}
+          onClick={() => openPath(channelId, "none", null)}>
+          <RandomPlaylistArtwork videos={selectedChannel.videos} />
+          <strong>Видео без плейлиста</strong><span className="muted">{selectedChannel.videos.length} видео</span>
+        </button>
+      </div>
     </section>;
   }
 
@@ -152,6 +157,33 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
       </button>)}
     </div>
   </section>;
+}
+
+function PlaylistArtwork({ playlist, videos }: { playlist: LibraryPlaylist; videos: LibraryItem[] }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [playlist.playlistId, playlist.thumbnailUrl]);
+
+  if (playlist.thumbnailUrl && !failed) {
+    return <img className="library-playlist-thumbnail" src={playlist.thumbnailUrl}
+      alt={`Превью плейлиста ${playlist.title}`} loading="lazy" onError={() => setFailed(true)} />;
+  }
+
+  const previews = playlist.videoIds.map(id => videos.find(video => video.videoId === id))
+    .filter((video): video is LibraryItem => video !== undefined).slice(0, 4);
+  return <div className="library-playlist-collage" aria-hidden="true">
+    {Array.from({ length: 4 }, (_, index) => {
+      const video = previews[index];
+      return video ? <img key={video.videoId} src={video.thumbnailUrl} alt="" loading="lazy" />
+        : <span key={`empty-${index}`} />;
+    })}
+  </div>;
+}
+
+function RandomPlaylistArtwork({ videos }: { videos: LibraryItem[] }) {
+  const videoIds = useMemo(() => videos.map(video => video.videoId).sort(() => Math.random() - 0.5), [videos]);
+  return <PlaylistArtwork playlist={{ playlistId: "none", title: "Видео без плейлиста",
+    videoCount: videos.length, thumbnailUrl: "", videoIds }} videos={videos} />;
 }
 
 function SortSelect({ value, onChange }: { value: string; onChange: (mode: string) => void }) {
