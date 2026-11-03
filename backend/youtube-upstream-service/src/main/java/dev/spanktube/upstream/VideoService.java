@@ -49,7 +49,7 @@ public class VideoService {
 
     private String cacheKey(String videoId) {
         String mode = egressProperties.mode().name().toLowerCase(Locale.ROOT);
-        return "spanktube:streams:v1:" + mode + ":" + videoId;
+        return "spanktube:streams:v3:" + mode + ":" + videoId;
     }
 
     private static void validateVideoId(String videoId) {

@@ -41,12 +41,13 @@ class UpstreamClient {
                 video == null ? null : video.width(), video == null ? null : video.height(),
                 video == null ? null : video.codecs(), audio == null ? null : audio.codecs(),
                 string(data, "description"), audio == null ? null : audio.bitrate());
-        return new VideoDownload(metadata, estimated, formats);
+        return new VideoDownload(metadata, estimated, formats, subtitles(data), chapters(data));
     }
 
-    record VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes, List<FormatOption> formats) {
+    record VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes, List<FormatOption> formats,
+            List<SubtitleOption> subtitles, List<ChapterOption> chapters) {
         VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes) {
-            this(metadata, estimatedBytes, List.of());
+            this(metadata, estimatedBytes, List.of(), List.of(), List.of());
         }
 
         Selection select(ArchiveModels.DownloadOptions options) {
@@ -72,6 +73,37 @@ class UpstreamClient {
 
     record FormatOption(String formatId, String mimeType, String codecs, Integer width, Integer height,
             Double fps, Long bitrate, boolean hasVideo, boolean hasAudio, Long contentLength) {
+    }
+
+    record SubtitleOption(String trackId, String language, String label) {
+    }
+
+    record ChapterOption(String title, Long startSeconds) {
+    }
+
+    private static List<SubtitleOption> subtitles(Map<String, Object> data) {
+        if (!(data.get("subtitles") instanceof List<?> source)) {
+            return List.of();
+        }
+        return source.stream()
+                .filter(item -> item instanceof Map)
+                .map(item -> (Map<?, ?>) item)
+                .map(track -> new SubtitleOption(string(track, "trackId"), string(track, "language"),
+                        string(track, "label")))
+                .filter(track -> track.trackId() != null)
+                .toList();
+    }
+
+    private static List<ChapterOption> chapters(Map<String, Object> data) {
+        if (!(data.get("chapters") instanceof List<?> source)) {
+            return List.of();
+        }
+        return source.stream()
+                .filter(item -> item instanceof Map)
+                .map(item -> (Map<?, ?>) item)
+                .map(chapter -> new ChapterOption(string(chapter, "title"), longValue(chapter, "startSeconds")))
+                .filter(chapter -> chapter.startSeconds() != null)
+                .toList();
     }
 
     private static List<FormatOption> formats(Map<String, Object> data) {

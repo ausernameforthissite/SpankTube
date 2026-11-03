@@ -59,8 +59,12 @@ final class DownloadProgress {
         }
 
         synchronized Snapshot stage(ArchiveModels.Stage stage, long downloadedBytes, long totalBytes) {
+            return stage(stage, downloadedBytes, totalBytes, 0);
+        }
+
+        synchronized Snapshot stage(ArchiveModels.Stage stage, long downloadedBytes, long totalBytes, long speedBps) {
             changeStage(stage);
-            return new Snapshot(stage, downloadedBytes, totalBytes, 0, completed.size());
+            return new Snapshot(stage, downloadedBytes, totalBytes, speedBps, completed.size());
         }
 
         private void changeStage(ArchiveModels.Stage next) {

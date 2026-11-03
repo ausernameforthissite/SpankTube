@@ -23,7 +23,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
-class YtDlpDownloader {
+class YtDlpDownloader implements ArchiveDownloader {
 
     private final ArchiveProperties archiveProperties;
     private final EgressProperties egressProperties;
@@ -47,10 +47,11 @@ class YtDlpDownloader {
 
     long download(ArchiveModels.ExistingVideo metadata) {
         Path directory = Path.of(archiveProperties.root()).resolve(metadata.channelId()).resolve(metadata.videoId());
-        return download(metadata, ArchiveModels.DownloadOptions.archiveDefaults(), directory, 0, progress -> { }).sizeBytes();
+        return download(new UpstreamClient.VideoDownload(metadata, 0), ArchiveModels.DownloadOptions.archiveDefaults(),
+                directory, 0, progress -> { }).sizeBytes();
     }
 
-    ArchiveModels.DownloadedFile inspect(Path output, ArchiveModels.DownloadOptions options) {
+    public ArchiveModels.DownloadedFile inspect(Path output, ArchiveModels.DownloadOptions options) {
         try {
             return metadata(output, options.audioOnly() ? "mp3" : "mkv", options,
                     output.getParent().resolve("info.json"));
@@ -59,9 +60,10 @@ class YtDlpDownloader {
         }
     }
 
-    ArchiveModels.DownloadedFile download(ArchiveModels.ExistingVideo metadata,
+    public ArchiveModels.DownloadedFile download(UpstreamClient.VideoDownload download,
             ArchiveModels.DownloadOptions options, Path directory, long estimatedBytes,
             Consumer<DownloadProgress.Snapshot> progress) {
+        ArchiveModels.ExistingVideo metadata = download.metadata();
         Path root = Path.of(archiveProperties.root()).toAbsolutePath().normalize();
         directory = directory.toAbsolutePath().normalize();
         if (!directory.startsWith(root)) {
@@ -151,13 +153,13 @@ class YtDlpDownloader {
         }
     }
 
-    void discard(ArchiveModels.ExistingVideo metadata) {
+    public void discard(ArchiveModels.ExistingVideo metadata) {
         Path archivedPath = Path.of(metadata.archivedPath());
         discard(archivedPath.isAbsolute() ? archivedPath.getParent()
                 : Path.of(archiveProperties.root()).resolve(archivedPath).getParent());
     }
 
-    void discard(Path directory) {
+    public void discard(Path directory) {
         Path root = Path.of(archiveProperties.root()).toAbsolutePath().normalize();
         directory = directory.toAbsolutePath().normalize();
         if (!directory.startsWith(root) || !Files.isDirectory(directory)) {
@@ -262,7 +264,7 @@ class YtDlpDownloader {
         return run(command, directory, timeout, estimatedBytes, progress, new DownloadProgress.Tracker());
     }
 
-    private String run(List<String> command, Path directory, Duration timeout, long estimatedBytes,
+    String run(List<String> command, Path directory, Duration timeout, long estimatedBytes,
             Consumer<DownloadProgress.Snapshot> progress, DownloadProgress.Tracker tracker) {
         Process process = null;
         try {

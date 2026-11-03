@@ -18,5 +18,6 @@ public record VideoDetails(
         String publishedAt,
         String thumbnailUrl,
         List<StreamFormat> formats,
-        List<SubtitleTrack> subtitles) {
+        List<SubtitleTrack> subtitles,
+        List<VideoChapter> chapters) {
 }

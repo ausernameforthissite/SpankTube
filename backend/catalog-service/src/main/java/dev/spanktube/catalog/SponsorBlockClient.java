@@ -30,7 +30,7 @@ class SponsorBlockClient {
     List<Segment> segments(String videoId) {
         try {
             List<Map<String, Object>> response = client.get()
-                    .uri("/api/skipSegments?videoID={videoId}&categories=%5B%22sponsor%22%5D", videoId)
+                    .uri("/api/skipSegments?videoID={videoId}&categories={categories}", videoId, "[\"sponsor\"]")
                     .retrieve()
                     .body(new org.springframework.core.ParameterizedTypeReference<>() { });
             if (response == null) {

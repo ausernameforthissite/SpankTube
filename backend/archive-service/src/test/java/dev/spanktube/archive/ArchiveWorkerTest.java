@@ -28,7 +28,7 @@ class ArchiveWorkerTest {
     void rateLimitKeepsPartialFilesForRetryAndUsesLongBackoff() {
         ArchiveModels.JobItem item = item(0);
         ArchiveModels.ExistingVideo metadata = prepare(item, 0);
-        when(downloader.download(eq(metadata), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
+        when(downloader.download(any(UpstreamClient.VideoDownload.class), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
                 anyLong(), any())).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
 
         worker().work();
@@ -41,7 +41,7 @@ class ArchiveWorkerTest {
     void finalRateLimitFailureRemovesUnregisteredFiles() {
         ArchiveModels.JobItem item = item(2);
         ArchiveModels.ExistingVideo metadata = prepare(item, 2);
-        when(downloader.download(eq(metadata), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
+        when(downloader.download(any(UpstreamClient.VideoDownload.class), any(ArchiveModels.DownloadOptions.class), any(java.nio.file.Path.class),
                 anyLong(), any())).thenThrow(new ArchiveDownloadException("HTTP Error 429: Too Many Requests"));
         when(publisher.publish(any())).thenReturn(Mono.empty());
 
@@ -63,7 +63,7 @@ class ArchiveWorkerTest {
                 null, null, null, null, item.videoId(), "Video", null, 100L,
                 "channel/" + item.videoId() + "/video.mkv", "bv*+ba", 0);
         when(upstream.video(item.videoId())).thenReturn(new UpstreamClient.VideoDownload(metadata, 0));
-        when(downloader.download(any(ArchiveModels.ExistingVideo.class), any(ArchiveModels.DownloadOptions.class),
+        when(downloader.download(any(UpstreamClient.VideoDownload.class), any(ArchiveModels.DownloadOptions.class),
                 any(java.nio.file.Path.class), anyLong(), any())).thenReturn(new ArchiveModels.DownloadedFile(
                         100, 1920, 1080, "av1", "opus", "399", "251", "mkv", 914L, 131000L));
         when(publisher.publish(any())).thenReturn(Mono.empty());

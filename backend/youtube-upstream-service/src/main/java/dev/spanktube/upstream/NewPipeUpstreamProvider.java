@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import dev.spanktube.egress.EgressProbe;
 import org.schabi.newpipe.extractor.Image;
@@ -38,6 +40,9 @@ import reactor.netty.http.client.HttpClient;
 
 @Component
 class NewPipeUpstreamProvider implements UpstreamProvider {
+
+    private static final Pattern DESCRIPTION_CHAPTER = Pattern.compile(
+            "(?i)(?:^|<br\\s*/?>)\\s*(?:<a\\b[^>]*>)?(?:(\\d+):)?(\\d{1,2}):(\\d{2})(?:</a>)?\\s+([^<\\r\\n]+)");
 
     private final StreamingService service = ServiceList.YouTube;
     private final NewPipePageCodec pages;
@@ -75,13 +80,19 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
                         stream.getDisplayLanguageName(), "vtt", stream.getContent()));
             }
             String channelUrl = info.getUploaderUrl();
+            List<VideoChapter> chapters = info.getStreamSegments().stream()
+                    .map(segment -> new VideoChapter(segment.getTitle(), (long) segment.getStartTimeSeconds()))
+                    .toList();
+            if (chapters.isEmpty()) {
+                chapters = chaptersFromDescription(info.getDescription() == null ? null : info.getDescription().content());
+            }
             return new VideoDetails(info.getId(), info.getName(),
                     info.getDescription() == null ? null : info.getDescription().content(), channelId(channelUrl),
                     info.getUploaderName(), handle(channelUrl), customPath(channelUrl),
                     bestImage(info.getUploaderAvatars()), number(info.getUploaderSubscriberCount()),
                     number(info.getDuration()), number(info.getViewCount()), number(info.getLikeCount()),
                     info.getUploadDate() == null ? null : info.getUploadDate().getInstant().toString(),
-                    bestImage(info.getThumbnails()), List.copyOf(formats), List.copyOf(subtitles));
+                    bestImage(info.getThumbnails()), List.copyOf(formats), List.copyOf(subtitles), chapters);
         });
     }
 
@@ -266,6 +277,24 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
 
     private static String range(int start, int end) {
         return start >= 0 && end > start ? start + "-" + end : null;
+    }
+
+    static List<VideoChapter> chaptersFromDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return List.of();
+        }
+        List<VideoChapter> chapters = new ArrayList<>();
+        Matcher matcher = DESCRIPTION_CHAPTER.matcher(description);
+        while (matcher.find()) {
+            long hours = matcher.group(1) == null ? 0 : Long.parseLong(matcher.group(1));
+            long minutes = Long.parseLong(matcher.group(2));
+            long seconds = Long.parseLong(matcher.group(3));
+            String title = matcher.group(4).trim();
+            if (!title.isEmpty()) {
+                chapters.add(new VideoChapter(title, hours * 3600 + minutes * 60 + seconds));
+            }
+        }
+        return List.copyOf(chapters);
     }
 
     private static ListLinkHandler tab(ChannelInfo info, String name) {

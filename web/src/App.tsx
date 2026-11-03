@@ -7,6 +7,7 @@ import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
 import { LibraryView } from "./LibraryView";
 import { Pagination } from "./Pagination";
+import { PlayerControls } from "./PlayerControls";
 import { PlaybackLog } from "./PlaybackLog";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
@@ -74,6 +75,8 @@ type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "us
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const MEDIA_BASE_URL = (import.meta.env.VITE_MEDIA_BASE_URL || API_BASE_URL).replace(/\/$/, "");
+const ANTIBOT_ACTIONS = ["Enable the bgutil PO-token provider for yt-dlp",
+  "Update yt-dlp to the latest release", "Switch the UpstreamProvider adapter"];
 
 class RequestError extends Error {
   constructor(message: string, readonly actions: string[] = []) {
@@ -235,6 +238,7 @@ export default function App() {
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false, preferBestQuality: true, theme: "system" });
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
   const watchProgressRef = useRef(watchProgress);
   watchProgressRef.current = watchProgress;
@@ -280,6 +284,7 @@ export default function App() {
   const playerDestroyRef = useRef<Promise<void> | null>(null);
   const lastTouchTapRef = useRef<{ timeStamp: number; x: number; y: number } | null>(null);
   const lastTouchSeekRef = useRef(0);
+  const lastControlsPointerRef = useRef(0);
   const [controlsOverlayVisible, setControlsOverlayVisible] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [seekEffect, setSeekEffect] = useState<{ direction: "left" | "right"; position: number;
@@ -329,17 +334,17 @@ export default function App() {
       setActions(reason.actions);
     } else if (typeof reason === "object" && reason && "message" in reason) {
       const data = "data" in reason && reason.data != null ? Array.from(reason.data as ArrayLike<unknown>) : [];
+      if (data.some(item => typeof item === "string" && item.includes("\"code\":\"ANTIBOT\""))) {
+        setActions(ANTIBOT_ACTIONS);
+      }
       const details = data.length > 0
         ? ` · ${data.slice(0, 3).map(item => item instanceof Error ? `${item.name}: ${item.message}` : String(item)).join(" · ").slice(0, 500)}`
         : "";
       setError(`Плеер: ${String(reason.message)}${details}`);
-      setActions([]);
     } else if (reason instanceof Error) {
       setError(reason.message);
-      setActions([]);
     } else {
       setError(String(reason));
-      setActions([]);
     }
   }, []);
 
@@ -494,26 +499,40 @@ export default function App() {
 
   useEffect(() => {
     if (!session) {
+      setSettingsLoaded(false);
       setWatchProgress({});
       setArchiveLocations({});
       progressRequestRef.current = null;
       return;
     }
-    progressRequestRef.current = Promise.all([
+    progressRequestRef.current = Promise.allSettled([
       apiFetch("/api/v1/users/me/settings"),
       apiFetch("/api/v1/library/progress"),
       apiFetch("/api/v1/library/locations?scope=global"),
-    ]).then(async ([settingsResponse, progressResponse, locationsResponse]) => {
-      setSettings(await settingsResponse.json());
-      const entries = await progressResponse.json() as WatchProgress[];
-      setWatchProgress(Object.fromEntries(entries.map(entry => [entry.videoId, entry])));
-      const locations = await locationsResponse.json() as LibraryLocation[];
-      const map: Record<string, LibraryLocation> = {};
-      for (const location of locations) {
-        if (!map[location.videoId]) map[location.videoId] = location;
+    ]).then(async ([settingsResult, progressResult, locationsResult]) => {
+      if (settingsResult.status === "rejected") throw settingsResult.reason;
+      const loadedSettings = await settingsResult.value.json() as UserSettings;
+      autoplayRef.current = loadedSettings.autoplay;
+      setSettings(loadedSettings);
+      if (progressResult.status === "fulfilled") {
+        const entries = await progressResult.value.json() as WatchProgress[];
+        setWatchProgress(Object.fromEntries(entries.map(entry => [entry.videoId, entry])));
       }
-      setArchiveLocations(map);
-    }).catch(showError);
+      if (locationsResult.status === "fulfilled") {
+        const locations = await locationsResult.value.json() as LibraryLocation[];
+        const map: Record<string, LibraryLocation> = {};
+        for (const location of locations) {
+          if (!map[location.videoId]) map[location.videoId] = location;
+        }
+        setArchiveLocations(map);
+      } else {
+        showError(locationsResult.reason);
+      }
+      setSettingsLoaded(true);
+    }).catch(reason => {
+      setSettingsLoaded(true);
+      showError(reason);
+    });
   }, [session, apiFetch, showError]);
 
   useEffect(() => {
@@ -769,13 +788,15 @@ export default function App() {
 
   useEffect(() => {
     setTheater(false);
+    setControlsOverlayVisible(false);
+    setPlaybackPosition(0);
     setSelectedQuality(settings.preferBestQuality ? "best" : "auto");
     setQualityTracks([]);
     playerRef.current = null;
   }, [watchId]);
 
   useEffect(() => {
-    if (!watchId || !videoElement || !archiveChecked) return;
+    if (!watchId || !videoElement || !archiveChecked || !settingsLoaded) return;
     let disposed = false;
     let player: shaka.Player | null = null;
     setPlayerReady(false);
@@ -855,7 +876,7 @@ export default function App() {
       if (player) playerDestroyRef.current = player.destroy();
       playerRef.current = null;
     };
-  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion, requestedStart]);
+  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion, requestedStart, settingsLoaded]);
 
   useEffect(() => {
     if (!video || !videoElement || !video.sponsorBlock?.length) return;
@@ -1073,8 +1094,19 @@ export default function App() {
     }
   };
 
-  const revealNativeControls = useCallback(() => {
-    setControlsOverlayVisible(current => !current);
+  const controlsClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const singleClickControls = useCallback(() => {
+    if (controlsClickTimer.current) clearTimeout(controlsClickTimer.current);
+    controlsClickTimer.current = setTimeout(() => {
+      controlsClickTimer.current = null;
+      setControlsOverlayVisible(current => !current);
+    }, 300);
+  }, []);
+
+  const cancelControlsClick = useCallback(() => {
+    if (controlsClickTimer.current) clearTimeout(controlsClickTimer.current);
+    controlsClickTimer.current = null;
   }, []);
 
   const showSeekEffect = useCallback((offset: number) => {
@@ -1090,25 +1122,38 @@ export default function App() {
 
   useEffect(() => () => {
     if (seekEffectTimer.current) clearTimeout(seekEffectTimer.current);
+    if (controlsClickTimer.current) clearTimeout(controlsClickTimer.current);
   }, []);
+
+  const seekTo = useCallback((position: number) => {
+    if (!videoElement) return;
+    videoElement.currentTime = position;
+    setPlaybackPosition(position);
+  }, [videoElement]);
 
   const seekFromPointer = useCallback((clientX: number) => {
     if (!videoElement || !controlsReady || !Number.isFinite(videoElement.duration)) return;
     const bounds = videoElement.getBoundingClientRect();
     const offset = clientX < bounds.left + bounds.width / 2 ? -10 : 10;
-    videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + offset));
-    setPlaybackPosition(videoElement.currentTime);
+    seekTo(Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + offset)));
     showSeekEffect(offset);
-  }, [videoElement, controlsReady, showSeekEffect]);
+  }, [videoElement, controlsReady, seekTo, showSeekEffect]);
 
   const doubleClickSeek = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
+    cancelControlsClick();
     if (Date.now() - lastTouchSeekRef.current < 500) return;
     seekFromPointer(event.clientX);
-  }, [seekFromPointer]);
+  }, [cancelControlsClick, seekFromPointer]);
 
-  const touchSeek = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "touch" || !event.isPrimary) return;
+  const seekPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button > 0) return;
+    lastControlsPointerRef.current = Date.now();
+    if (event.pointerType !== "touch") {
+      if (controlsReady) singleClickControls();
+      return;
+    }
     if (!controlsReady) {
       lastTouchTapRef.current = null;
       return;
@@ -1117,13 +1162,15 @@ export default function App() {
     if (previous && event.timeStamp - previous.timeStamp <= 350
       && Math.abs(event.clientX - previous.x) <= 40 && Math.abs(event.clientY - previous.y) <= 40) {
       event.preventDefault();
+      cancelControlsClick();
       lastTouchSeekRef.current = Date.now();
       lastTouchTapRef.current = null;
       seekFromPointer(event.clientX);
     } else {
       lastTouchTapRef.current = { timeStamp: event.timeStamp, x: event.clientX, y: event.clientY };
+      singleClickControls();
     }
-  }, [controlsReady, seekFromPointer]);
+  }, [controlsReady, cancelControlsClick, singleClickControls, seekFromPointer]);
 
   const dismissJob = useCallback(async (job: QueueJob) => {
     setError(null);
@@ -1210,7 +1257,9 @@ export default function App() {
           <button type="button" className="error-close" aria-label="Закрыть сообщение об ошибке" title="Закрыть"
             onClick={() => { setError(null); setActions([]); }}>×</button>
           <strong>{error}</strong>
-          {actions.length > 0 && <ul>{actions.map(action => <li key={action}>{action}</li>)}</ul>}
+          {(actions.length > 0 || error.includes("\"code\":\"ANTIBOT\"")) && <ul>
+            {(actions.length > 0 ? actions : ANTIBOT_ACTIONS).map(action => <li key={action}>{action}</li>)}
+          </ul>}
         </section>
       )}
       {loading && !archiveFile && metadataSupported && location.path !== "/watch" && <div className="metadata-loading panel">
@@ -1227,8 +1276,9 @@ export default function App() {
       {watchId && (
         <article>
           <section className={theater ? "player panel theater-panel" : "player panel"}>
-            <div className={theater ? "video-frame theater" : "video-frame"}>
-              <video ref={setVideoElement} controls={controlsReady} playsInline
+            <div className={theater ? "video-frame theater" : "video-frame"}
+              onMouseDownCapture={event => { if (event.detail > 1) event.preventDefault(); }}>
+              <video ref={setVideoElement} playsInline
                 aria-label="Видеоплеер. Двойной клик слева — на 10 секунд назад, справа — вперёд"
                 onLoadedMetadata={() => {
                   syncMediaReady();
@@ -1247,52 +1297,35 @@ export default function App() {
                 onEmptied={() => setMediaReady(false)}
                 onPause={() => {
                   syncMediaReady();
+                  setControlsOverlayVisible(true);
                   setPlaybackStatus("Пауза");
                   void reportProgress();
                 }} />
               {controlsReady && <div className="seek-gestures" aria-hidden="true"
-                onClick={event => { if (event.detail === 1) revealNativeControls(); }}
-                onDoubleClickCapture={doubleClickSeek} onPointerUp={touchSeek} />}
+                onClick={event => {
+                  if (event.detail <= 1 && Date.now() - lastTouchSeekRef.current >= 500
+                    && Date.now() - lastControlsPointerRef.current >= 500) singleClickControls();
+                }}
+                onDoubleClickCapture={doubleClickSeek} onPointerUp={seekPointerUp} />}
               {seekEffect && <div key={seekEffect.id} className={`seek-effect ${seekEffect.direction}${seekEffect.leaving ? " leaving" : ""}`} aria-hidden="true">
                 <div className="seek-effect-circle" />
                 <div className="seek-effect-arrows">{[0, 1, 2].map(index => <span key={index} style={{ animationDelay: `${index * 0.15}s` }}>
                   {seekEffect.direction === "left" ? "◀" : "▶"}
                 </span>)}</div>
                 <div className="seek-effect-label">10 секунд</div>
-                <div className="seek-effect-time">{formatDuration(seekEffect.position)} / {formatDuration(seekEffect.duration)}</div>
+                <div className="seek-effect-time">{formatDuration(Math.round(seekEffect.position))} / {formatDuration(Math.round(seekEffect.duration))}</div>
               </div>}
-              {controlsOverlayVisible && controlsReady && <div className="controls-overlay"
-                onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
-                <button className="secondary icon-button" aria-label={videoElement?.paused === false ? "Пауза" : "Играть"}
-                  onClick={togglePlayback}>{videoElement?.paused === false ? "⏸" : "▶"}</button>
-                <input type="range" min={0} max={videoElement && Number.isFinite(videoElement.duration) ? videoElement.duration : 0}
-                  step={0.1} value={playbackPosition} aria-label="Позиция видео"
-                  onChange={event => {
-                    if (videoElement) videoElement.currentTime = Number(event.target.value);
-                    setPlaybackPosition(Number(event.target.value));
-                  }} />
-                <span className="controls-overlay-time">{formatDuration(Math.floor(playbackPosition))} / {formatDuration(Math.floor(videoElement?.duration || 0))}</span>
-              </div>}
+              {videoElement && controlsOverlayVisible && controlsReady && <PlayerControls
+                video={videoElement} player={playerRef.current} position={playbackPosition}
+                sponsorSegments={video?.sponsorBlock || []} autoplay={settings.autoplay}
+                qualityTracks={qualityTracks} selectedQuality={selectedQuality} theater={theater}
+                onTogglePlayback={togglePlayback} onSeek={seekTo} onSelectQuality={selectQuality}
+                onToggleAutoplay={() => void updateSettings({ autoplay: !settings.autoplay })}
+                onToggleTheater={() => setTheater(current => !current)} onError={showError} />}
               {!controlsReady && <PlaybackLog lines={loading && !archiveFile && metadataLogs.length > 0
                 ? metadataLogs : playbackLogs} />}
             </div>
             <div className="playback">
-              <button type="button" className="secondary" onClick={togglePlayback} disabled={!videoElement || !controlsReady}>
-                {videoElement?.paused === false ? "Пауза" : "Играть"}
-              </button>
-              {playerReady && qualityTracks.length > 0 && <select className="quality-select" aria-label="Качество видео"
-                value={selectedQuality} onChange={event => selectQuality(event.target.value)}>
-                <option value="best">Лучшее</option><option value="auto">Авто</option>
-                {qualityTracks.map(track => <option key={track.id} value={track.id}>
-                  {track.height}p · {Math.round(track.bandwidth / 1000)} kbps
-                </option>)}
-              </select>}
-              <button type="button" className="secondary icon-button" aria-label={theater ? "Выйти из театрального режима" : "Театральный режим"}
-                title={theater ? "Обычный размер" : "На всю ширину экрана"} onClick={() => setTheater(current => !current)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true">{theater
-                  ? <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
-                  : <path d="M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5" />}</svg>
-              </button>
               {video && <>
                 {archiveFile
                   ? <button type="button" className="secondary" onClick={() => void downloadBlob(archiveFile.downloadUrl, archiveFile.filename)}>Скачать из архива</button>

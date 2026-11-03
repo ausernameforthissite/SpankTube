@@ -1,5 +1,7 @@
 export type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
+export type SponsorSegment = { startSeconds: number; endSeconds: number; category: string };
+
 export type VideoFormat = {
   formatId: string;
   mimeType: string | null;

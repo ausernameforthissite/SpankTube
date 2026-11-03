@@ -14,12 +14,12 @@ class ArchiveWorker {
     private final ArchiveJobService jobs;
     private final UpstreamClient upstreamClient;
     private final CatalogClient catalogClient;
-    private final YtDlpDownloader downloader;
+    private final ArchiveDownloader downloader;
     private final EventPublisher publisher;
     private final ArchiveProperties properties;
 
     ArchiveWorker(ArchiveJobService jobs, UpstreamClient upstreamClient, CatalogClient catalogClient,
-            YtDlpDownloader downloader, EventPublisher publisher, ArchiveProperties properties) {
+            ArchiveDownloader downloader, EventPublisher publisher, ArchiveProperties properties) {
         this.jobs = jobs;
         this.upstreamClient = upstreamClient;
         this.catalogClient = catalogClient;
@@ -92,7 +92,7 @@ class ArchiveWorker {
                     selection.video() == null ? null : selection.video().formatId(),
                     selection.audio() == null ? null : selection.audio().formatId(),
                     options.subtitles(), options.sponsorBlock());
-            ArchiveModels.DownloadedFile file = downloader.download(metadata, selectedOptions, directory,
+            ArchiveModels.DownloadedFile file = downloader.download(download, selectedOptions, directory,
                     selection.estimatedBytes(), progress -> jobs.progress(job.id(), progress));
             jobs.progress(job.id(), new DownloadProgress.Snapshot(ArchiveModels.Stage.FINISHING,
                     file.sizeBytes(), file.sizeBytes(), 0));

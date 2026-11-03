@@ -27,6 +27,10 @@ class YtDlpResponseParser {
         }
         List<SubtitleTrack> subtitles = new ArrayList<>();
         parseSubtitles(root.path("subtitles"), false, subtitles);
+        List<VideoChapter> chapters = new ArrayList<>();
+        for (JsonNode chapter : root.path("chapters")) {
+            chapters.add(new VideoChapter(text(chapter, "title"), longValue(chapter, "start_time")));
+        }
 
         String publishedAt = root.path("timestamp").isNumber()
                 ? Instant.ofEpochSecond(root.path("timestamp").asLong()).toString()
@@ -48,7 +52,8 @@ class YtDlpResponseParser {
                 publishedAt,
                 bestThumbnail(root),
                 formats,
-                List.copyOf(subtitles));
+                List.copyOf(subtitles),
+                List.copyOf(chapters));
     }
 
     SearchResults search(String json) {

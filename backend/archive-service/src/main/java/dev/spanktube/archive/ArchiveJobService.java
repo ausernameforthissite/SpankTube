@@ -20,13 +20,13 @@ class ArchiveJobService {
     private final ArchiveRepository repository;
     private final EventPublisher publisher;
     private final CatalogClient catalogClient;
-    private final YtDlpDownloader downloader;
+    private final ArchiveDownloader downloader;
     private final ArchiveProperties properties;
     private final ArchiveEvents events;
     private final AtomicLong lastProgress = new AtomicLong();
 
     ArchiveJobService(ArchiveRepository repository, EventPublisher publisher, CatalogClient catalogClient,
-            YtDlpDownloader downloader, ArchiveProperties properties, ArchiveEvents events) {
+            ArchiveDownloader downloader, ArchiveProperties properties, ArchiveEvents events) {
         this.repository = repository;
         this.publisher = publisher;
         this.catalogClient = catalogClient;

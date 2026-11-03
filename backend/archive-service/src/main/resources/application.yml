@@ -35,6 +35,8 @@ spanktube:
     cleanup-cron: ${ARCHIVE_CLEANUP_CRON:0 */15 * * * *}
   upstream:
     url: ${UPSTREAM_SERVICE_URL:http://localhost:8081}
+  media:
+    url: ${MEDIA_SERVICE_URL:http://localhost:8082}
   catalog:
     url: ${CATALOG_SERVICE_URL:http://localhost:8084}
   user:

@@ -49,6 +49,8 @@ spec:
                   key: password
             - name: UPSTREAM_SERVICE_URL
               value: http://youtube-upstream-service:8081
+            - name: MEDIA_SERVICE_URL
+              value: http://media-service:8082
             - name: CATALOG_SERVICE_URL
               value: http://catalog-service:8084
             - name: USER_SERVICE_URL
