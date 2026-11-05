@@ -47,7 +47,8 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
             return new VideoDetails(details.videoId(), details.title(), details.description(), details.channelId(),
                     details.channelName(), details.channelHandle(), details.channelCustomPath(), channel.avatarUrl(),
                     channel.subscriberCount(), details.durationSeconds(), details.viewCount(), details.likeCount(),
-                    details.publishedAt(), details.thumbnailUrl(), details.formats(), details.subtitles(), details.chapters());
+                    details.publishedAt(), details.thumbnailUrl(), details.formats(), details.subtitles(), details.chapters(),
+                    details.madeForKids());
         } catch (UpstreamException error) {
             return details;
         }

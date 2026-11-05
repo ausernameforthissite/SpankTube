@@ -104,6 +104,7 @@ class ArchiveWorker {
             catalogClient.prepare(job.ownerUsername(), file.sizeBytes(), item.videoId(),
                     job.kind() == ArchiveModels.Kind.REFRESH);
             String quality = file.videoFormatId() == null ? metadata.quality()
+                    : file.audioFormatId() == null ? file.videoFormatId()
                     : file.videoFormatId() + "+" + file.audioFormatId();
             ArchiveModels.ExistingVideo completed = new ArchiveModels.ExistingVideo(
                     job.ownerUsername(), metadata.channelId(), metadata.channelName(), metadata.channelHandle(),

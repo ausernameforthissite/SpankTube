@@ -734,6 +734,8 @@ export interface components {
             channelUrl: string;
             /** @description media-service URL */
             thumbnailUrl: string | null;
+            /** @description YouTube Kids marker confirmed by the dedicated upstream client */
+            madeForKids?: boolean;
             manifestUrl: string;
             formats: components["schemas"]["Format"][];
             subtitles: components["schemas"]["Subtitle"][];

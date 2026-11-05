@@ -13,7 +13,7 @@ import reactor.core.publisher.Mono;
 @Service
 class Mp4IndexService {
 
-    private static final int HEADER_BYTES = 64 * 1024;
+    private static final int HEADER_BYTES = 256 * 1024;
     private final WebClient youtubeClient;
     private final PlaybackLogService playbackLogs;
 
@@ -42,11 +42,13 @@ class Mp4IndexService {
                 .retrieve()
                 .bodyToMono(byte[].class)
                 .map(bytes -> withIndex(format, bytes))
+                .retryWhen(MediaRetry.transientFailures())
                 .doOnNext(enriched -> playbackLogs.log(videoId, playbackSession,
                         "MP4-индекс готов: формат " + format.formatId()));
     }
 
     static UpstreamVideo.Format withIndex(UpstreamVideo.Format format, byte[] bytes) {
+        format = withAvcCodec(format, bytes);
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         int offset = 0;
         while (offset + 8 <= buffer.capacity()) {
@@ -74,6 +76,31 @@ class Mp4IndexService {
                 break;
             }
             offset += (int) size;
+        }
+        return format;
+    }
+
+    private static UpstreamVideo.Format withAvcCodec(UpstreamVideo.Format format, byte[] bytes) {
+        if (!format.hasVideo() || format.codecs() == null) {
+            return format;
+        }
+        for (int offset = 0; offset + 8 <= bytes.length; offset++) {
+            if (bytes[offset] != 'a' || bytes[offset + 1] != 'v' || bytes[offset + 2] != 'c'
+                    || bytes[offset + 3] != 'C') {
+                continue;
+            }
+            String codecs = String.format("avc1.%02X%02X%02X", bytes[offset + 5], bytes[offset + 6],
+                    bytes[offset + 7]);
+            int audioSeparator = format.codecs().indexOf(',');
+            if (audioSeparator >= 0) {
+                codecs += format.codecs().substring(audioSeparator);
+            } else if (format.hasAudio()) {
+                codecs += ",mp4a.40.2";
+            }
+            return new UpstreamVideo.Format(format.formatId(), format.url(), format.mimeType(), codecs,
+                    format.width(), format.height(), format.fps(), format.bitrate(), format.audioSampleRate(),
+                    format.contentLength(), format.hasVideo(), format.hasAudio(), format.initRange(),
+                    format.indexRange());
         }
         return format;
     }

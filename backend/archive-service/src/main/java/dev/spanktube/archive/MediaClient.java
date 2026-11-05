@@ -51,41 +51,29 @@ class MediaClient {
         long downloaded = 0;
         long total = Math.max(0, estimatedBytes);
         long started = System.nanoTime();
-        boolean append = false;
         try {
             while (total == 0 || downloaded < total) {
-                long end = total > 0 ? Math.min(downloaded + chunkSize, total) - 1 : downloaded + chunkSize - 1;
-                HttpResponse<InputStream> response = request(baseUrl + "/media/v/" + videoId + "/seg/" + formatId,
-                        "bytes=" + downloaded + "-" + end);
-                if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    throw failure(response);
+                Chunk chunk = null;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        chunk = downloadChunk(videoId, formatId, destination, downloaded, total);
+                        break;
+                    } catch (IOException error) {
+                        if (attempt == 2 || !isTransient(error)) {
+                            throw error;
+                        }
+                        try (var channel = java.nio.channels.FileChannel.open(destination,
+                                StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+                            channel.truncate(downloaded);
+                        }
+                        Thread.sleep(1000L << attempt);
+                    }
                 }
-                if (response.statusCode() == 200 && downloaded > 0) {
-                    throw new ArchiveDownloadException("Server ignored Range after a partial download");
-                }
-                long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(0);
-                long rangeTotal = rangeTotal(response.headers().firstValue("Content-Range").orElse(""));
-                if (rangeTotal > 0) {
-                    total = rangeTotal;
-                } else if (response.statusCode() == 200 && contentLength > 0) {
-                    total = contentLength;
-                } else if (response.statusCode() == 206) {
-                    total = 0;
-                }
-                try (InputStream input = response.body(); OutputStream output = Files.newOutputStream(destination,
-                        StandardOpenOption.CREATE, StandardOpenOption.WRITE,
-                        append ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING)) {
-                    input.transferTo(output);
-                }
-                long next = contentLength > 0 ? downloaded + contentLength : Files.size(destination);
-                if (next <= downloaded) {
-                    throw new ArchiveDownloadException("Empty media chunk before the expected end of stream");
-                }
-                downloaded = next;
-                append = true;
+                downloaded = chunk.downloaded();
+                total = chunk.total();
                 long speed = Math.round(downloaded / Math.max(0.001, (System.nanoTime() - started) / 1_000_000_000.0));
                 progress.accept(tracker.stage(stage, downloaded, total, speed));
-                if (response.statusCode() == 200 || rangeTotal < 0 && contentLength < chunkSize) {
+                if (chunk.complete()) {
                     break;
                 }
             }
@@ -95,6 +83,61 @@ class MediaClient {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new ArchiveDownloadException("Interrupted while downloading media track", error);
+        }
+    }
+
+    private Chunk downloadChunk(String videoId, String formatId, Path destination, long offset, long total)
+            throws IOException, InterruptedException {
+        long end = total > 0 ? Math.min(offset + chunkSize, total) - 1 : offset + chunkSize - 1;
+        HttpResponse<InputStream> response = request(baseUrl + "/media/v/" + videoId + "/seg/" + formatId,
+                "bytes=" + offset + "-" + end);
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            ArchiveDownloadException failure = failure(response);
+            if (response.statusCode() == 502 || response.statusCode() == 503 || response.statusCode() == 504) {
+                throw new TransientMediaException(failure.getMessage(), failure);
+            }
+            throw failure;
+        }
+        if (response.statusCode() == 200 && offset > 0) {
+            throw new ArchiveDownloadException("Server ignored Range after a partial download");
+        }
+        long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(0);
+        long rangeTotal = rangeTotal(response.headers().firstValue("Content-Range").orElse(""));
+        if (rangeTotal > 0) {
+            total = rangeTotal;
+        } else if (response.statusCode() == 200 && contentLength > 0) {
+            total = contentLength;
+        } else if (response.statusCode() == 206) {
+            total = 0;
+        }
+        try (InputStream input = response.body(); OutputStream output = Files.newOutputStream(destination,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                offset > 0 ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING)) {
+            input.transferTo(output);
+        }
+        long next = Files.size(destination);
+        if (contentLength > 0 && next != offset + contentLength) {
+            throw new java.io.EOFException("Incomplete media chunk");
+        }
+        if (next <= offset) {
+            throw new ArchiveDownloadException("Empty media chunk before the expected end of stream");
+        }
+        boolean complete = response.statusCode() == 200 || rangeTotal < 0 && contentLength < chunkSize;
+        return new Chunk(next, total, complete);
+    }
+
+    private static boolean isTransient(IOException error) {
+        return error instanceof TransientMediaException || error instanceof java.net.http.HttpTimeoutException
+                || error instanceof java.io.EOFException || error instanceof java.net.SocketException
+                || error instanceof javax.net.ssl.SSLException;
+    }
+
+    private record Chunk(long downloaded, long total, boolean complete) {
+    }
+
+    private static final class TransientMediaException extends IOException {
+        private TransientMediaException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 

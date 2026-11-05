@@ -19,5 +19,6 @@ public record VideoDetails(
         String thumbnailUrl,
         List<StreamFormat> formats,
         List<SubtitleTrack> subtitles,
-        List<VideoChapter> chapters) {
+        List<VideoChapter> chapters,
+        Boolean madeForKids) {
 }

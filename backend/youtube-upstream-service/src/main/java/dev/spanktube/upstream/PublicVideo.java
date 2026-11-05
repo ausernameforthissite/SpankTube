@@ -17,7 +17,8 @@ public record PublicVideo(
         String publishedAt,
         String manifestUrl,
         List<Format> formats,
-        List<Subtitle> subtitles) {
+        List<Subtitle> subtitles,
+        boolean madeForKids) {
 
     static PublicVideo from(VideoDetails details) {
         String prefix = "/media/v/" + details.videoId();
@@ -39,7 +40,8 @@ public record PublicVideo(
                 MediaLinks.thumbnail(details.channelAvatarUrl(),
                         details.channelId() == null ? null : "/media/channel/" + details.channelId() + "/avatar"),
                 channelUrl, prefix + "/thumbnail", details.durationSeconds(), details.viewCount(), details.likeCount(),
-                details.publishedAt(), prefix + "/manifest.mpd", formats, subtitles);
+                details.publishedAt(), prefix + "/manifest.mpd", formats, subtitles,
+                Boolean.TRUE.equals(details.madeForKids()));
     }
 
     public record Format(String formatId, String mimeType, String codecs, Integer width, Integer height,

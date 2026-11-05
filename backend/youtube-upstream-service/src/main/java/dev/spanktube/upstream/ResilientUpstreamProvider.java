@@ -13,16 +13,40 @@ class ResilientUpstreamProvider implements UpstreamProvider {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ResilientUpstreamProvider.class);
     private final NewPipeUpstreamProvider primary;
+    private final KidsVideoClient kids;
     private final YtDlpUpstreamProvider fallback;
 
-    ResilientUpstreamProvider(NewPipeUpstreamProvider primary, YtDlpUpstreamProvider fallback) {
+    ResilientUpstreamProvider(NewPipeUpstreamProvider primary, KidsVideoClient kids, YtDlpUpstreamProvider fallback) {
         this.primary = primary;
+        this.kids = kids;
         this.fallback = fallback;
     }
 
     @Override
     public VideoDetails video(String videoId) {
-        return execute("video " + videoId, () -> primary.video(videoId), () -> fallback.video(videoId));
+        try {
+            return primary.video(videoId);
+        } catch (IllegalArgumentException error) {
+            throw error;
+        } catch (UpstreamException error) {
+            if (error.reason() == UpstreamException.Reason.EGRESS_UNAVAILABLE) {
+                throw error;
+            }
+            LOGGER.warn("NewPipe video {} failed; trying YouTube Kids client: {}", videoId, error.getMessage());
+        }
+        try {
+            var details = kids.video(videoId);
+            if (details.isPresent()) {
+                LOGGER.info("Video {} identified as made for kids; using Android Reel client", videoId);
+                return details.get();
+            }
+        } catch (UpstreamException error) {
+            if (error.reason() == UpstreamException.Reason.EGRESS_UNAVAILABLE) {
+                throw error;
+            }
+            LOGGER.warn("YouTube Kids client {} failed; falling back to yt-dlp: {}", videoId, error.getMessage());
+        }
+        return fallback.video(videoId);
     }
 
     @Override

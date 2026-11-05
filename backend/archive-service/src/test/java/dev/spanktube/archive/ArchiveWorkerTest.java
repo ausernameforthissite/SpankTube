@@ -52,6 +52,21 @@ class ArchiveWorkerTest {
     }
 
     @Test
+    void progressiveVideoQualityDoesNotContainNullAudioFormat() {
+        ArchiveModels.JobItem item = item(0);
+        prepare(item, 0);
+        when(downloader.download(any(UpstreamClient.VideoDownload.class), any(ArchiveModels.DownloadOptions.class),
+                any(java.nio.file.Path.class), anyLong(), any())).thenReturn(new ArchiveModels.DownloadedFile(
+                        100, 640, 356, "h264", "aac", "18", null, "mkv", 390L, null));
+        when(publisher.publish(any())).thenReturn(Mono.empty());
+
+        worker().work();
+
+        verify(publisher).publish(org.mockito.ArgumentMatchers.argThat(event ->
+                event.payload() instanceof ArchiveModels.ExistingVideo version && "18".equals(version.quality())));
+    }
+
+    @Test
     void refreshCreatesSeparateVersionAndUsesFileDuration() {
         ArchiveModels.JobItem item = item(0);
         ArchiveModels.Job job = new ArchiveModels.Job(item.jobId(), ArchiveModels.Kind.REFRESH,

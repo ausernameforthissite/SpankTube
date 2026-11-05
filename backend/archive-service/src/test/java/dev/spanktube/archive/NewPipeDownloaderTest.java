@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,6 +69,32 @@ class NewPipeDownloaderTest {
         var info = new ObjectMapper().readTree(directory.resolve("info.json").toFile());
         assertThat(info.path("format_id").asText()).isEqualTo("137+251");
         assertThat(info.path("extractor").asText()).isEqualTo("NewPipeExtractor");
+    }
+
+    @Test
+    void acceptsProgressiveVideoWithEmbeddedAudio() throws Exception {
+        when(mediaClient.downloadTrack(anyString(), anyString(), any(), anyLong(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Path output = invocation.getArgument(2, Path.class);
+                    Files.writeString(output, "progressive");
+                    return 11L;
+                });
+        when(mediaClient.downloadResource(anyString(), any())).thenAnswer(invocation -> {
+            Files.writeString(invocation.getArgument(1, Path.class), "resource");
+            return 8L;
+        });
+        when(sponsorBlockClient.segments("dQw4w9WgXcQ")).thenReturn(List.of());
+        UpstreamClient.VideoDownload source = new UpstreamClient.VideoDownload(source().metadata(), 1000,
+                List.of(new UpstreamClient.FormatOption("18", "video/mp4", "avc1,mp4a", 640, 360, 25.0,
+                        500_000L, true, true, 1000L)), List.of(), List.of());
+
+        new TestDownloader().download(source, ArchiveModels.DownloadOptions.archiveDefaults(), directory, 1000,
+                progress -> { });
+
+        verify(mediaClient, times(1)).downloadTrack(eq("dQw4w9WgXcQ"), eq("18"), any(), eq(1000L),
+                eq(ArchiveModels.Stage.DOWNLOADING_VIDEO), any(), any());
+        assertThat(new ObjectMapper().readTree(directory.resolve("info.json").toFile())
+                .path("format_id").asText()).isEqualTo("18");
     }
 
     private UpstreamClient.VideoDownload source() {

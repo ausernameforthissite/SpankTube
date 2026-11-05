@@ -51,7 +51,9 @@ class NewPipeDownloader implements ArchiveDownloader {
         try {
             Files.createDirectories(directory);
             UpstreamClient.Selection selection = source.select(options);
-            if (!options.audioOnly() && selection.video() == null || !options.videoOnly() && selection.audio() == null) {
+            boolean combinedVideo = selection.video() != null && selection.video().hasAudio();
+            if (!options.audioOnly() && selection.video() == null
+                    || !options.videoOnly() && selection.audio() == null && !combinedVideo) {
                 throw new ArchiveDownloadException("NewPipe did not return the requested media tracks");
             }
             ArchiveModels.ExistingVideo metadata = source.metadata();

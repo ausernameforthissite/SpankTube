@@ -42,11 +42,12 @@ class MediaController {
     private final ArchivePlaybackService archivePlayback;
     private final ThumbnailService thumbnailService;
     private final PlaybackLogService playbackLogs;
+    private final ProgressiveDashService progressiveDash;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
             DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
             ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
-            ThumbnailService thumbnailService, PlaybackLogService playbackLogs) {
+            ThumbnailService thumbnailService, PlaybackLogService playbackLogs, ProgressiveDashService progressiveDash) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
@@ -55,6 +56,7 @@ class MediaController {
         this.archivePlayback = archivePlayback;
         this.thumbnailService = thumbnailService;
         this.playbackLogs = playbackLogs;
+        this.progressiveDash = progressiveDash;
     }
 
     @GetMapping(value = "/media/v/{videoId}/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -73,15 +75,23 @@ class MediaController {
                     return upstreamClient.video(videoId)
                             .doOnNext(video -> playbackLogs.log(videoId, playbackSession,
                                     "Получено форматов: " + video.formats().size()))
-                            .flatMap(video -> mp4IndexService.enrich(video, playbackSession))
-                            .map(manifestGenerator::generate)
-                            .map(body -> ResponseEntity.ok()
-                                    .contentType(DASH)
-                                    .cacheControl(CacheControl.noCache())
-                                    .body(body));
+                            .flatMap(video -> {
+                                Mono<String> body = ProgressiveDashService.requiresRemux(video)
+                                        ? progressiveDash.manifest(video, playbackSession)
+                                        : mp4IndexService.enrich(video, playbackSession).map(manifestGenerator::generate);
+                                return body.map(content -> ResponseEntity.ok()
+                                        .contentType(DASH)
+                                        .cacheControl(CacheControl.noCache())
+                                        .body(content));
+                            });
                 }))
                 .doOnNext(response -> playbackLogs.log(videoId, playbackSession, "DASH-манифест готов"))
                 .doOnError(error -> playbackLogs.error(videoId, playbackSession, error));
+    }
+
+    @GetMapping("/media/v/{videoId}/remux/{filename}")
+    Mono<ResponseEntity<FileSystemResource>> remuxSegment(@PathVariable String videoId, @PathVariable String filename) {
+        return progressiveDash.file(videoId, filename);
     }
 
     @GetMapping("/media/v/{videoId}/archive/{filename}")
@@ -163,6 +173,7 @@ class MediaController {
                 .headers(outgoing -> copyHeaders(incoming, outgoing, REQUEST_HEADERS))
                 .retrieve()
                 .toEntityFlux(DataBuffer.class)
+                .retryWhen(MediaRetry.transientFailures())
                 .map(response -> {
                     HttpHeaders outgoing = new HttpHeaders();
                     copyHeaders(response.getHeaders(), outgoing, RESPONSE_HEADERS);

@@ -92,7 +92,7 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
                     bestImage(info.getUploaderAvatars()), number(info.getUploaderSubscriberCount()),
                     number(info.getDuration()), number(info.getViewCount()), number(info.getLikeCount()),
                     info.getUploadDate() == null ? null : info.getUploadDate().getInstant().toString(),
-                    bestImage(info.getThumbnails()), List.copyOf(formats), List.copyOf(subtitles), chapters);
+                    bestImage(info.getThumbnails()), List.copyOf(formats), List.copyOf(subtitles), chapters, false);
         });
     }
 

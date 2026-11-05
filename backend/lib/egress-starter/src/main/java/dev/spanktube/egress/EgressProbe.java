@@ -61,6 +61,8 @@ public final class EgressProbe implements SmartLifecycle {
                 .exchangeToMono(response -> response.releaseBody()
                         .thenReturn(response.statusCode().value() == 204))
                 .timeout(properties.probe().timeout())
+                .retryWhen(reactor.util.retry.Retry.backoff(2, Duration.ofSeconds(1))
+                        .filter(EgressProbe::isTransientNetworkError))
                 .map(success -> {
                     sample.stop(latency);
                     available.set(success ? 1 : 0);
@@ -75,6 +77,17 @@ public final class EgressProbe implements SmartLifecycle {
                 });
     }
 
+    private static boolean isTransientNetworkError(Throwable error) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current instanceof org.springframework.web.reactive.function.client.WebClientRequestException
+                    || current instanceof java.util.concurrent.TimeoutException
+                    || current instanceof reactor.netty.http.client.PrematureCloseException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public void start() {
         if (running) {
@@ -87,7 +100,7 @@ public final class EgressProbe implements SmartLifecycle {
 
     private void probeSafely() {
         try {
-            Duration wait = properties.probe().timeout().plusSeconds(1);
+            Duration wait = properties.probe().timeout().multipliedBy(3).plusSeconds(4);
             Boolean success = probe().block(wait);
             if (!Boolean.TRUE.equals(success) && log.isWarnEnabled()) {
                 log.warn("YouTube egress probe failed: {}", lastError());

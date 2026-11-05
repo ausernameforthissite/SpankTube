@@ -53,6 +53,75 @@ class MediaClientTest {
     }
 
     @Test
+    void retriesTemporaryFailureWithoutRepeatingCompletedRanges() throws Exception {
+        List<String> ranges = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/media/v/video/seg/18", exchange -> {
+            String range = exchange.getRequestHeaders().getFirst("Range");
+            ranges.add(range);
+            if (ranges.size() == 1) {
+                respond(exchange, 503, "temporary", null);
+            } else if ("bytes=0-3".equals(range)) {
+                respond(exchange, 206, "abcd", "bytes 0-3/8");
+            } else if ("bytes=4-7".equals(range)) {
+                respond(exchange, 206, "efgh", "bytes 4-7/8");
+            } else {
+                respond(exchange, 416, "invalid range", null);
+            }
+        });
+        server.start();
+        try {
+            MediaClient client = new MediaClient("http://127.0.0.1:" + server.getAddress().getPort(), 4);
+            Path output = directory.resolve("track.mp4");
+
+            long downloaded = client.downloadTrack("video", "18", output, 8,
+                    ArchiveModels.Stage.DOWNLOADING_VIDEO, new DownloadProgress.Tracker(), progress -> { });
+
+            assertThat(downloaded).isEqualTo(8);
+            assertThat(Files.readString(output)).isEqualTo("abcdefgh");
+            assertThat(ranges).containsExactly("bytes=0-3", "bytes=0-3", "bytes=4-7");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void discardsPartialChunkBeforeRetry() throws Exception {
+        List<String> ranges = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/media/v/video/seg/18", exchange -> {
+            String range = exchange.getRequestHeaders().getFirst("Range");
+            ranges.add(range);
+            if ("bytes=4-7".equals(range)) {
+                respond(exchange, 206, "efgh", "bytes 4-7/8");
+                return;
+            }
+            exchange.getResponseHeaders().add("Content-Range", "bytes 0-3/8");
+            exchange.sendResponseHeaders(206, 4);
+            if (ranges.size() == 1) {
+                exchange.getResponseBody().write("ab".getBytes(StandardCharsets.UTF_8));
+            } else {
+                exchange.getResponseBody().write("abcd".getBytes(StandardCharsets.UTF_8));
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            MediaClient client = new MediaClient("http://127.0.0.1:" + server.getAddress().getPort(), 4);
+            Path output = directory.resolve("track.mp4");
+
+            long downloaded = client.downloadTrack("video", "18", output, 8,
+                    ArchiveModels.Stage.DOWNLOADING_VIDEO, new DownloadProgress.Tracker(), progress -> { });
+
+            assertThat(downloaded).isEqualTo(8);
+            assertThat(Files.readString(output)).isEqualTo("abcdefgh");
+            assertThat(ranges).containsExactly("bytes=0-3", "bytes=0-3", "bytes=4-7");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void preservesUpstreamErrorBody() throws Exception {
         String body = "{\"code\":\"ANTIBOT\",\"message\":\"blocked\"}";
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

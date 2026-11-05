@@ -53,7 +53,8 @@ class YtDlpResponseParser {
                 bestThumbnail(root),
                 formats,
                 List.copyOf(subtitles),
-                List.copyOf(chapters));
+                List.copyOf(chapters),
+                false);
     }
 
     SearchResults search(String json) {

@@ -853,8 +853,13 @@ export default function App() {
     playerRef.current = null;
   }, [watchId]);
 
+  const videoFormatsReady = video !== null;
+  const progressiveRemux = Boolean(!playbackVersion && video?.formats.length === 1
+    && video.formats[0].hasVideo && video.formats[0].hasAudio && video.formats[0].mimeType?.includes("mp4"));
+
   useEffect(() => {
     if (!watchId || !videoElement || !archiveChecked || !settingsLoaded) return;
+    if (!playbackVersion && !videoFormatsReady) return;
     let disposed = false;
     let player: shaka.Player | null = null;
     setPlayerReady(false);
@@ -891,7 +896,21 @@ export default function App() {
       player.addEventListener("error", event => showError((event as CustomEvent<unknown>).detail));
       const manifestParams = new URLSearchParams({ playbackSession });
       if (playbackVersion) manifestParams.set("version", playbackVersion);
-      await player.load(`${MEDIA_BASE_URL}/media/v/${watchId}/manifest.mpd?${manifestParams}`);
+      const manifestUrl = `${MEDIA_BASE_URL}/media/v/${watchId}/manifest.mpd?${manifestParams}`;
+      if (progressiveRemux) {
+        setPlaybackStatus("Подготовка DASH из прогрессивного MP4…");
+        const prepared = await fetch(manifestUrl, {
+          headers: { Authorization: `Bearer ${await ensureAccessToken()}` },
+          signal: AbortSignal.timeout(15 * 60_000),
+        });
+        if (!prepared.ok) throw await responseError(prepared);
+        await prepared.arrayBuffer();
+      }
+      if (disposed) {
+        await player.destroy();
+        return;
+      }
+      await player.load(manifestUrl);
       if (disposed) {
         await player.destroy();
         return;
@@ -934,7 +953,8 @@ export default function App() {
       if (player) playerDestroyRef.current = player.destroy();
       playerRef.current = null;
     };
-  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion, requestedStart, settingsLoaded]);
+  }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion,
+    requestedStart, settingsLoaded, videoFormatsReady, progressiveRemux]);
 
   useEffect(() => {
     if (!video || !videoElement || !video.sponsorBlock?.length) return;

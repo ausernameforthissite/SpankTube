@@ -1,0 +1,95 @@
+package dev.spanktube.upstream;
+
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class KidsVideoParserTest {
+
+    private final KidsVideoParser parser = new KidsVideoParser(new ObjectMapper());
+
+    @Test
+    void detectsMadeForKidsAndParsesProgressiveMedia() {
+        String json = """
+                {
+                  "playabilityStatus": {
+                    "status": "OK",
+                    "miniplayer": {"miniplayerRenderer": {"playbackMode": "PLAYBACK_MODE_PAUSED_ONLY"}}
+                  },
+                  "videoDetails": {
+                    "title": "Kids video", "shortDescription": "0:00 Intro", "channelId": "UC123",
+                    "author": "Channel", "lengthSeconds": "32", "viewCount": "1234",
+                    "thumbnail": {"thumbnails": [
+                      {"url": "https://i.ytimg.com/small.jpg", "width": 320, "height": 180},
+                      {"url": "https://i.ytimg.com/large.jpg", "width": 1280, "height": 720}
+                    ]}
+                  },
+                  "microformat": {"playerMicroformatRenderer": {"publishDate": "2024-01-02"}},
+                  "streamingData": {
+                    "formats": [{
+                      "itag": 18, "url": "https://rr1.googlevideo.com/videoplayback", "mimeType": "video/mp4",
+                      "codecs": null, "width": 640, "height": 360, "fps": 25,
+                      "bitrate": 500000, "contentLength": "2000000",
+                      "initRange": {"start": "0", "end": "740"}, "indexRange": {"start": "741", "end": "900"}
+                    }],
+                    "adaptiveFormats": [{
+                      "itag": 140, "url": "https://rr1.googlevideo.com/audio", "mimeType": "audio/mp4",
+                      "codecs": "mp4a.40.2", "bitrate": 130000, "audioSampleRate": "44100"
+                    }]
+                  },
+                  "captions": {"playerCaptionsTracklistRenderer": {"captionTracks": [
+                    {"languageCode": "en", "baseUrl": "https://www.youtube.com/api/timedtext?lang=en", "name": {"simpleText": "English"}},
+                    {"languageCode": "de", "kind": "asr", "vssId": "a.de", "baseUrl": "https://www.youtube.com/api/timedtext?lang=de", "name": {"simpleText": "German"}}
+                  ]}}
+                }
+                """;
+
+        VideoDetails details = parser.parse("38a0f-fXZCc", json).orElseThrow();
+
+        assertThat(details.madeForKids()).isTrue();
+        assertThat(details.title()).isEqualTo("Kids video");
+        assertThat(details.thumbnailUrl()).isEqualTo("https://i.ytimg.com/large.jpg");
+        assertThat(details.durationSeconds()).isEqualTo(32);
+        assertThat(details.formats()).hasSize(2);
+        StreamFormat progressive = details.formats().getFirst();
+        assertThat(progressive.hasVideo()).isTrue();
+        assertThat(progressive.hasAudio()).isTrue();
+        assertThat(progressive.codecs()).isEqualTo("avc1.42001E,mp4a.40.2");
+        assertThat(progressive.initRange()).isEqualTo("0-740");
+        assertThat(progressive.indexRange()).isEqualTo("741-900");
+        assertThat(details.subtitles()).singleElement().satisfies(track -> {
+            assertThat(track.language()).isEqualTo("en");
+            assertThat(track.url()).endsWith("fmt=vtt");
+        });
+        assertThat(details.chapters()).singleElement().satisfies(chapter -> assertThat(chapter.title()).isEqualTo("Intro"));
+    }
+
+    @Test
+    void ignoresOrdinaryVideosWithoutKidsMarker() {
+        String json = """
+                {"playabilityStatus":{"status":"OK","miniplayer":{"miniplayerRenderer":{"playbackMode":"PLAYBACK_MODE_DEFAULT"}}}}
+                """;
+
+        assertThat(parser.parse("38a0f-fXZCc", json)).isEmpty();
+    }
+
+    @Test
+    void acceptsCachedVideosWithoutMadeForKidsFlag() {
+        String json = """
+                {
+                  "videoId": "MQziBPCMEL8", "title": "Cached video", "description": null,
+                  "channelId": "UC123", "channelName": "Channel", "channelHandle": null,
+                  "channelCustomPath": null, "channelAvatarUrl": null, "channelSubscriberCount": null,
+                  "durationSeconds": 390, "viewCount": 100, "likeCount": null,
+                  "publishedAt": "2024-01-02", "thumbnailUrl": null,
+                  "formats": [], "subtitles": [], "chapters": []
+                }
+                """;
+
+        VideoDetails details = new ObjectMapper().readValue(json, VideoDetails.class);
+
+        assertThat(details.madeForKids()).isNull();
+        assertThat(PublicVideo.from(details).madeForKids()).isFalse();
+    }
+}

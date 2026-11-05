@@ -38,8 +38,10 @@ class ArchivePlaybackServiceTest {
         Path thumbnail = Files.createDirectories(directory.resolve("playlists/playlist")).resolve("thumbnail");
         Files.writeString(thumbnail, "jpeg");
         ArchivePlaybackService service = new ArchivePlaybackService(mock(CatalogArchiveClient.class),
-                mock(PlaybackLogService.class), directory.toString(), directory.resolve("cache").toString(),
-                "ffmpeg", Duration.ofMinutes(1));
+                mock(PlaybackLogService.class),
+                new OnDemandDashService(mock(PlaybackLogService.class), new tools.jackson.databind.ObjectMapper(),
+                        "ffmpeg", "ffprobe"),
+                directory.toString(), directory.resolve("cache").toString());
 
         var response = service.archivedPlaylistThumbnail("playlist").block();
 
