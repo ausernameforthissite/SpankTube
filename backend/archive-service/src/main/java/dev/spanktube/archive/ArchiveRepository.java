@@ -224,6 +224,18 @@ class ArchiveRepository {
                 UUID.fromString(jobId), username);
     }
 
+    java.time.Instant lastChannelArchive(String username, String channelId) {
+        return jdbc.query("select max(coalesce(finished_at, created_at)) from archive_jobs "
+                        + "where owner_id = ? and kind = 'CHANNEL' and target_id = ?",
+                rs -> {
+                    if (!rs.next()) {
+                        return null;
+                    }
+                    java.sql.Timestamp timestamp = rs.getTimestamp(1);
+                    return timestamp == null ? null : timestamp.toInstant();
+                }, username, channelId);
+    }
+
     long waitingAhead(String username) {
         QueueMarker first = jdbc.query("select id, priority, created_at from archive_jobs "
                         + "where owner_id = ? and status = 'queued' order by priority, created_at limit 1",

@@ -1,14 +1,21 @@
 import type { UserPlaylist } from "./types";
 
-export function CardContextMenu({ onAdd, onArchive, onDownload }: {
-  onAdd: () => void;
-  onArchive: () => void;
-  onDownload: () => void;
+export function CardContextMenu({ onAdd, onArchive, onDownloadMkv, onDownload, onRemove, downloadsDisabled = false }: {
+  onAdd?: () => void;
+  onArchive?: () => void;
+  onDownloadMkv?: () => void;
+  onDownload?: () => void;
+  onRemove?: () => void;
+  downloadsDisabled?: boolean;
 }) {
   return <div className="card-context-menu" role="menu">
-    <button role="menuitem" onClick={onAdd}>Добавить в плейлист</button>
-    <button role="menuitem" onClick={onArchive}>Архивировать</button>
-    <button role="menuitem" onClick={onDownload}>Скачать</button>
+    {onAdd && <button role="menuitem" onClick={onAdd}>Добавить в плейлист</button>}
+    {onArchive && <button role="menuitem" disabled={downloadsDisabled}
+      title={downloadsDisabled ? "Активный эфир нельзя архивировать" : undefined} onClick={onArchive}>Архивировать</button>}
+    {onDownloadMkv && <button role="menuitem" onClick={onDownloadMkv}>Скачать MKV</button>}
+    {onDownload && <button role="menuitem" disabled={downloadsDisabled}
+      title={downloadsDisabled ? "Активный эфир нельзя скачивать" : undefined} onClick={onDownload}>Скачать</button>}
+    {onRemove && <button role="menuitem" className="danger" onClick={onRemove}>Удалить</button>}
   </div>;
 }
 

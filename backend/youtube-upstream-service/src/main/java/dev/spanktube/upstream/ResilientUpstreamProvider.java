@@ -15,11 +15,14 @@ class ResilientUpstreamProvider implements UpstreamProvider {
     private final NewPipeUpstreamProvider primary;
     private final KidsVideoClient kids;
     private final YtDlpUpstreamProvider fallback;
+    private final LiveDashClient liveClient;
 
-    ResilientUpstreamProvider(NewPipeUpstreamProvider primary, KidsVideoClient kids, YtDlpUpstreamProvider fallback) {
+    ResilientUpstreamProvider(NewPipeUpstreamProvider primary, KidsVideoClient kids, YtDlpUpstreamProvider fallback,
+            LiveDashClient liveClient) {
         this.primary = primary;
         this.kids = kids;
         this.fallback = fallback;
+        this.liveClient = liveClient;
     }
 
     @Override
@@ -32,7 +35,19 @@ class ResilientUpstreamProvider implements UpstreamProvider {
             if (error.reason() == UpstreamException.Reason.EGRESS_UNAVAILABLE) {
                 throw error;
             }
-            LOGGER.warn("NewPipe video {} failed; trying YouTube Kids client: {}", videoId, error.getMessage());
+            LOGGER.warn("NewPipe video {} failed; trying VisionOS live client: {}", videoId, error.getMessage());
+        }
+        try {
+            var details = liveClient.liveVideo(videoId);
+            if (details.isPresent()) {
+                LOGGER.info("Video {} uses VisionOS live playback", videoId);
+                return details.get();
+            }
+        } catch (UpstreamException error) {
+            if (error.reason() == UpstreamException.Reason.EGRESS_UNAVAILABLE) {
+                throw error;
+            }
+            LOGGER.warn("VisionOS live client {} failed; trying YouTube Kids client: {}", videoId, error.getMessage());
         }
         try {
             var details = kids.video(videoId);
@@ -65,6 +80,12 @@ class ResilientUpstreamProvider implements UpstreamProvider {
     public SearchResults channelVideos(String channelId, String cursor) {
         return execute("channel videos " + channelId, () -> primary.channelVideos(channelId, cursor),
                 () -> fallback.channelVideos(channelId, cursor));
+    }
+
+    @Override
+    public SearchResults channelLiveStreams(String channelId, String cursor) {
+        return execute("channel live streams " + channelId, () -> primary.channelLiveStreams(channelId, cursor),
+                () -> fallback.channelLiveStreams(channelId, cursor));
     }
 
     @Override

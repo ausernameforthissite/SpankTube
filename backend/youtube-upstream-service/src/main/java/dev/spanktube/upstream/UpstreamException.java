@@ -25,6 +25,10 @@ public class UpstreamException extends RuntimeException {
         return new UpstreamException(Reason.FAILED, message, cause);
     }
 
+    public static UpstreamException dashUnavailable(String message) {
+        return new UpstreamException(Reason.DASH_UNAVAILABLE, message, null);
+    }
+
     public static UpstreamException antiBot(String message) {
         return new UpstreamException(Reason.ANTIBOT, message, null);
     }
@@ -32,6 +36,7 @@ public class UpstreamException extends RuntimeException {
     public enum Reason {
         EGRESS_UNAVAILABLE,
         ANTIBOT,
+        DASH_UNAVAILABLE,
         FAILED
     }
 }

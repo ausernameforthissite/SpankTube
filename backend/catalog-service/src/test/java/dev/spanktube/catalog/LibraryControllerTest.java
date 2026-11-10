@@ -30,4 +30,17 @@ class LibraryControllerTest {
 
         verify(libraryService).locations(null);
     }
+
+    @Test
+    void servesArchivedPlaylistIds() throws Exception {
+        when(libraryService.playlistIds("viewer", "channel")).thenReturn(List.of("p1", "p2"));
+
+        mvc.perform(get("/internal/v1/library/playlist-ids")
+                        .param("username", "viewer").param("channelId", "channel"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$[0]").value("p1"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$[1]").value("p2"));
+
+        verify(libraryService).playlistIds("viewer", "channel");
+    }
 }

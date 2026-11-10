@@ -28,6 +28,9 @@ class WatchProgressHandler {
     }
 
     Mono<Void> archiveIfNeeded(WatchProgressEvent progress) {
+        if (!userClient.autoArchive(progress.username())) {
+            return Mono.empty();
+        }
         if (progress.positionSeconds() < 30 && progress.watchPercent() < 5) {
             return Mono.empty();
         }

@@ -120,6 +120,12 @@ final class ArchiveModels {
                     channelAvatarUrl, channelSubscriberCount, videoId, title, publishedAt, durationSeconds,
                     path, quality, sizeBytes, width, height, videoCodec, audioCodec, description, audioBitrate);
         }
+
+        ExistingVideo withOwnerUsername(String owner) {
+            return new ExistingVideo(owner, channelId, channelName, channelHandle, channelCustomPath,
+                    channelAvatarUrl, channelSubscriberCount, videoId, title, publishedAt, durationSeconds,
+                    archivedPath, quality, sizeBytes, width, height, videoCodec, audioCodec, description, audioBitrate);
+        }
     }
 
     record DownloadedFile(long sizeBytes, Integer width, Integer height, String videoCodec, String audioCodec,

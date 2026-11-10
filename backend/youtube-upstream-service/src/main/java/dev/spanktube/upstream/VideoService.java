@@ -16,6 +16,7 @@ import tools.jackson.databind.ObjectMapper;
 public class VideoService {
 
     private static final Duration CACHE_TTL = Duration.ofHours(5);
+    private static final Duration LIVE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String VIDEO_ID_PATTERN = "[A-Za-z0-9_-]{11}";
 
     private final UpstreamProvider provider;
@@ -44,7 +45,8 @@ public class VideoService {
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(details -> Mono.fromCallable(() -> objectMapper.writeValueAsString(details))
                         .subscribeOn(Schedulers.boundedElastic())
-                        .flatMap(json -> redis.opsForValue().set(key, json, CACHE_TTL).thenReturn(details)));
+                        .flatMap(json -> redis.opsForValue().set(key, json,
+                                details.isLive() ? LIVE_CACHE_TTL : CACHE_TTL).thenReturn(details)));
     }
 
     private String cacheKey(String videoId) {

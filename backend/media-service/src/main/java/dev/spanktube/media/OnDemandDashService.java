@@ -85,7 +85,13 @@ class OnDemandDashService {
             }
             MediaIndex index = indexes.get(directory.toString());
             Path temporary = directory.resolve(filename + ".tmp");
-            if (filename.matches("init-[av]\\.m4s")) {
+            if (filename.matches("subtitle-\\d+\\.vtt")) {
+                int subtitle = Integer.parseInt(filename.substring(9, filename.length() - 4));
+                if (subtitle < 0 || subtitle >= index.subtitles().size()) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Archive subtitle not found");
+                }
+                createSubtitle(source, subtitle, temporary);
+            } else if (filename.matches("init-[av]\\.m4s")) {
                 createInit(source, filename.startsWith("init-v"), temporary);
             } else {
                 Matcher matcher = FRAGMENT.matcher(filename);
@@ -108,7 +114,8 @@ class OnDemandDashService {
     MediaIndex probe(Path source) {
         try {
             JsonNode metadata = objectMapper.readTree(run(List.of(ffprobe, "-v", "error",
-                    "-show_entries", "format=duration,size:stream=codec_type,codec_name,profile,level,width,height,avg_frame_rate",
+                    "-show_entries", "format=duration,size:stream=codec_type,codec_name,profile,level,width,height,"
+                            + "avg_frame_rate:stream_tags=language,title",
                     "-of", "json", source.toString()), PROBE_TIMEOUT));
             List<Double> keyframes;
             try {
@@ -125,7 +132,8 @@ class OnDemandDashService {
                 duration = keyframes.getLast() + 0.04;
             }
             return new MediaIndex(List.copyOf(keyframes), duration,
-                    stream(metadata, "video"), stream(metadata, "audio"), metadata.path("format").path("size").asLong(0));
+                    stream(metadata, "video"), stream(metadata, "audio"), metadata.path("format").path("size").asLong(0),
+                    subtitleStreams(metadata));
         } catch (IOException error) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Unable to read archived media index", error);
         }
@@ -153,10 +161,28 @@ class OnDemandDashService {
                 return new StreamMetadata(stream.path("codec_name").asText("unknown"),
                         stream.path("profile").asText(""), stream.path("level").asInt(-99),
                         stream.path("width").asInt(0), stream.path("height").asInt(0),
-                        stream.path("avg_frame_rate").asText(""));
+                        stream.path("avg_frame_rate").asText(""), stream.path("tags").path("language").asText(null),
+                        stream.path("tags").path("title").asText(null));
             }
         }
         return null;
+    }
+
+    private static List<SubtitleMetadata> subtitleStreams(JsonNode metadata) {
+        List<SubtitleMetadata> result = new ArrayList<>();
+        for (JsonNode stream : metadata.path("streams")) {
+            if ("subtitle".equals(stream.path("codec_type").asText())) {
+                String language = stream.path("tags").path("language").asText("und");
+                result.add(new SubtitleMetadata(language,
+                        stream.path("tags").path("title").asText(language)));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    void createSubtitle(Path source, int track, Path output) {
+        run(new ArrayList<>(List.of(ffmpeg, "-v", "error", "-y", "-i", source.toString(),
+                "-map", "0:s:" + track, "-f", "webvtt", output.toString())), SEGMENT_TIMEOUT);
     }
 
     void createInit(Path source, boolean video, Path output) {
@@ -227,6 +253,15 @@ class OnDemandDashService {
         if (index.audio() != null) {
             representation(result, index, false);
         }
+        for (int position = 0; position < index.subtitles().size(); position++) {
+            SubtitleMetadata subtitle = index.subtitles().get(position);
+            result.append("<AdaptationSet contentType=\"text\" id=\"").append(position + 2)
+                    .append("\" mimeType=\"text/vtt\" lang=\"").append(escape(subtitle.language()))
+                    .append("\" label=\"").append(escape(subtitle.title())).append("\">\n")
+                    .append("<Representation id=\"sub-").append(position).append("\" bandwidth=\"1\">")
+                    .append("<BaseURL>subtitle-").append(position).append(".vtt</BaseURL>")
+                    .append("</Representation></AdaptationSet>\n");
+        }
         return result.append("</Period>\n</MPD>\n").toString();
     }
 
@@ -234,8 +269,17 @@ class OnDemandDashService {
         StreamMetadata stream = video ? index.video() : index.audio();
         result.append("<AdaptationSet contentType=\"").append(video ? "video" : "audio")
                 .append("\" id=\"").append(video ? 0 : 1).append("\" mimeType=\"")
-                .append(video ? "video/mp4" : "audio/mp4").append("\" segmentAlignment=\"true\">\n")
-                .append("<Representation id=\"").append(video ? "v" : "a")
+                .append(video ? "video/mp4" : "audio/mp4").append("\" segmentAlignment=\"true\"");
+        if (!video) {
+            if (stream.language() != null) {
+                result.append(" lang=\"").append(escape(stream.language())).append('"');
+            }
+            result.append(" label=\"").append(escape(stream.title() != null ? stream.title() : stream.language() != null ? stream.language() : "Audio"))
+                    .append("\">\n<Role value=\"main\"/>\n");
+        } else {
+            result.append(">\n");
+        }
+        result.append("<Representation id=\"").append(video ? "v" : "a")
                 .append("\" codecs=\"").append(escape(video ? videoCodec(stream) : audioCodec(stream)))
                 .append("\" bandwidth=\"").append(index.bandwidth()).append('"');
         if (video && stream.width() > 0) {
@@ -304,12 +348,24 @@ class OnDemandDashService {
                 && Files.getLastModifiedTime(file).compareTo(Files.getLastModifiedTime(source)) >= 0;
     }
 
-    record MediaIndex(List<Double> keyframes, double duration, StreamMetadata video, StreamMetadata audio, long size) {
+    record MediaIndex(List<Double> keyframes, double duration, StreamMetadata video, StreamMetadata audio, long size,
+            List<SubtitleMetadata> subtitles) {
+        MediaIndex(List<Double> keyframes, double duration, StreamMetadata video, StreamMetadata audio, long size) {
+            this(keyframes, duration, video, audio, size, List.of());
+        }
+
         long bandwidth() {
             return size > 0 && duration > 0 ? Math.max(1, Math.round(size * 8 / duration)) : 1;
         }
     }
 
-    record StreamMetadata(String codec, String profile, int level, int width, int height, String frameRate) {
+    record StreamMetadata(String codec, String profile, int level, int width, int height, String frameRate,
+            String language, String title) {
+        StreamMetadata(String codec, String profile, int level, int width, int height, String frameRate) {
+            this(codec, profile, level, width, height, frameRate, null, null);
+        }
+    }
+
+    record SubtitleMetadata(String language, String title) {
     }
 }

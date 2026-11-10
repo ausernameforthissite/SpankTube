@@ -53,7 +53,39 @@ class OnDemandDashServiceTest {
         assertThat(command).doesNotContain("-start_at_zero", "-output_ts_offset");
     }
 
-    private static final class TestService extends OnDemandDashService {
+    @Test
+    void exposesArchivedSubtitlesWithoutPreparingVideoFragments() throws Exception {
+        TestService service = new TestService() {
+            @Override
+            MediaIndex probe(Path source) {
+                return new MediaIndex(List.of(0.0, 3.0), 4.0,
+                        new StreamMetadata("h264", "High", 40, 640, 360, "25/1"),
+                        new StreamMetadata("aac", "", -99, 0, 0, ""), 1000,
+                        List.of(new SubtitleMetadata("en", "English")));
+            }
+
+            @Override
+            void createSubtitle(Path source, int track, Path output) {
+                try {
+                    Files.writeString(output, "WEBVTT\n");
+                } catch (Exception error) {
+                    throw new AssertionError(error);
+                }
+            }
+        };
+        Path source = Files.writeString(directory.resolve("source.mkv"), "source");
+        Path cache = directory.resolve("cache");
+
+        service.prepare(source, cache, "video", "test");
+        String manifest = Files.readString(cache.resolve("ondemand.mpd"));
+
+        assertThat(manifest).contains("text/vtt", "subtitle-0.vtt", "English");
+        assertThat(cache.resolve("gop-v-00001.m4s")).doesNotExist();
+        assertThat(service.segment(source, cache, "video", "subtitle-0.vtt", null).exists()).isTrue();
+        assertThat(cache.resolve("gop-v-00001.m4s")).doesNotExist();
+    }
+
+    private static class TestService extends OnDemandDashService {
         private final AtomicInteger probes = new AtomicInteger();
         private final List<Double> starts = new ArrayList<>();
 

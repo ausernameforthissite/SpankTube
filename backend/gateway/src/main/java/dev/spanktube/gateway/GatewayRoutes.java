@@ -13,6 +13,9 @@ class GatewayRoutes {
         return routes.routes()
                 .route("auth-service", route -> route.path("/api/v1/auth/**")
                         .uri(properties.userServiceUrl()))
+                .route("archive-video-recording", route -> route.path(
+                        "/api/v1/videos/*/recording", "/api/v1/videos/*/recording/**")
+                        .uri(properties.archiveServiceUrl()))
                 .route("archive-video-download", route -> route.path("/api/v1/videos/*/download")
                         .uri(properties.archiveServiceUrl()))
                 .route("archive-video-save", route -> route.path("/api/v1/videos/*/save")

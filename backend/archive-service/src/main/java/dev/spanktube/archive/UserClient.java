@@ -21,6 +21,17 @@ class UserClient {
         return response.role();
     }
 
+    boolean autoArchive(String username) {
+        SettingsResponse response = client.get()
+                .uri("/internal/v1/users/{username}/settings", username)
+                .retrieve()
+                .body(SettingsResponse.class);
+        return !Boolean.FALSE.equals(response.autoArchive());
+    }
+
     record QuotaResponse(String role) {
+    }
+
+    record SettingsResponse(Boolean autoArchive) {
     }
 }

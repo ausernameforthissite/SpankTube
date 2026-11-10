@@ -31,7 +31,9 @@ export function AppHeader({ searchQuery, searchType, onQueryChange, onTypeChange
           <option value="playlists">Плейлисты</option>
           <option value="archive">Архив</option>
         </select>
-        <button type="submit">Найти</button>
+        <button type="submit" className="header-search-button" aria-label="Найти" title="Найти">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4.35-4.35" /></svg>
+        </button>
       </form>
       <div className="header-actions">
         <div className="split-button" ref={queueButtonRef}>

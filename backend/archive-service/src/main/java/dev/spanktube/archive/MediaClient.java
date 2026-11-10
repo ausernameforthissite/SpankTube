@@ -29,13 +29,24 @@ class MediaClient {
     private final HttpClient client;
     private final String baseUrl;
     private final int chunkSize;
+    private final ArchiveSpeedService speedStatistics;
 
     @Autowired
-    MediaClient(@Value("${spanktube.media.url:http://localhost:8082}") String mediaUrl) {
+    MediaClient(@Value("${spanktube.media.url:http://localhost:8082}") String mediaUrl,
+            ArchiveSpeedService speedStatistics) {
+        this(mediaUrl, CHUNK_SIZE, speedStatistics);
+    }
+
+    MediaClient(String mediaUrl) {
         this(mediaUrl, CHUNK_SIZE);
     }
 
     MediaClient(String mediaUrl, int chunkSize) {
+        this(mediaUrl, chunkSize, new ArchiveSpeedService());
+    }
+
+    MediaClient(String mediaUrl, int chunkSize, ArchiveSpeedService speedStatistics) {
+        this.speedStatistics = speedStatistics;
         if (chunkSize <= 0) {
             throw new IllegalArgumentException("Chunk size must be positive");
         }
@@ -77,6 +88,7 @@ class MediaClient {
                     break;
                 }
             }
+            speedStatistics.record(stage, downloaded, System.nanoTime() - started);
             return downloaded;
         } catch (IOException error) {
             throw new ArchiveDownloadException("Unable to download media track: " + error.getMessage(), error);

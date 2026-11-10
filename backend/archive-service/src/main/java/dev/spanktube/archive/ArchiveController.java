@@ -30,30 +30,36 @@ class ArchiveController {
     private final ArchiveEvents events;
     private final ArchiveProperties properties;
     private final PlaylistThumbnailService playlistThumbnails;
+    private final ArchivePreflightService preflights;
 
     ArchiveController(ArchiveJobService jobs, UpstreamClient upstreamClient, CatalogClient catalogClient,
-            ArchiveEvents events, ArchiveProperties properties, PlaylistThumbnailService playlistThumbnails) {
+            ArchiveEvents events, ArchiveProperties properties, PlaylistThumbnailService playlistThumbnails,
+            ArchivePreflightService preflights) {
         this.jobs = jobs;
         this.upstreamClient = upstreamClient;
         this.catalogClient = catalogClient;
         this.events = events;
         this.properties = properties;
         this.playlistThumbnails = playlistThumbnails;
+        this.preflights = preflights;
     }
 
     @PostMapping("/api/v1/videos/{videoId}/save")
     ResponseEntity<ArchiveModels.Job> saveVideo(@PathVariable String videoId, HttpServletRequest request) {
+        upstreamClient.requireNotLive(videoId);
         return enqueue(ArchiveModels.Kind.VIDEO, videoId, List.of(videoId), request);
     }
 
     @PostMapping("/api/v1/videos/{videoId}/refresh")
     ResponseEntity<ArchiveModels.Job> refreshVideo(@PathVariable String videoId, HttpServletRequest request) {
+        upstreamClient.requireNotLive(videoId);
         return enqueue(ArchiveModels.Kind.REFRESH, videoId, List.of(videoId), request);
     }
 
     @PostMapping("/api/v1/videos/{videoId}/download")
     ResponseEntity<ArchiveModels.Job> downloadVideo(@PathVariable String videoId,
             @RequestBody DownloadRequest options, HttpServletRequest request) {
+        upstreamClient.requireNotLive(videoId);
         ArchiveModels.DownloadOptions downloadOptions = new ArchiveModels.DownloadOptions(
                 options.videoFormatId(), options.audioFormatId(),
                 options.subtitles() == null || options.subtitles(),
@@ -64,16 +70,23 @@ class ArchiveController {
     }
 
     @PostMapping("/api/v1/playlists/{playlistId}/save")
-    ResponseEntity<ArchiveModels.Job> savePlaylist(@PathVariable String playlistId, HttpServletRequest request) {
+    ResponseEntity<ArchiveModels.Job> savePlaylist(@PathVariable String playlistId, HttpServletRequest request,
+            @RequestParam String estimateId) {
+        ArchivePreflightService.Estimate estimate = preflights.validate(estimateId, ArchiveModels.Kind.PLAYLIST,
+                playlistId, username(request));
         UpstreamClient.PlaylistArchive playlist = upstreamClient.playlistArchive(playlistId);
         playlistThumbnails.save(playlistId, playlist.thumbnailUrl());
-        catalogClient.registerPlaylist(username(request), playlistId, playlist.title(), playlist.channelId(), playlist.videoIds());
-        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, playlist.videoIds(), request);
+        catalogClient.registerPlaylist(username(request), playlistId, playlist.title(), playlist.channelId(),
+                estimate.videoIds());
+        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, estimate.videoIds(), request);
     }
 
     @PostMapping("/api/v1/channels/{channelId}/save")
-    ResponseEntity<ArchiveModels.Job> saveChannel(@PathVariable String channelId, HttpServletRequest request) {
-        return enqueue(ArchiveModels.Kind.CHANNEL, channelId, upstreamClient.channelVideos(channelId), request);
+    ResponseEntity<ArchiveModels.Job> saveChannel(@PathVariable String channelId, HttpServletRequest request,
+            @RequestParam String estimateId) {
+        ArchivePreflightService.Estimate estimate = preflights.validate(estimateId, ArchiveModels.Kind.CHANNEL,
+                channelId, username(request));
+        return enqueue(ArchiveModels.Kind.CHANNEL, channelId, estimate.videoIds(), request);
     }
 
     @GetMapping("/api/v1/archive/jobs")

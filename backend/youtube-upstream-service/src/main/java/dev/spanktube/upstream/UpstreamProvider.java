@@ -17,6 +17,10 @@ public interface UpstreamProvider {
         return new SearchResults(channel.videos(), channel.nextCursor());
     }
 
+    default SearchResults channelLiveStreams(String channelId, String cursor) {
+        return new SearchResults(java.util.List.of(), null);
+    }
+
     default SearchResults channelPlaylists(String channelId, String cursor) {
         return new SearchResults(channel(channelId).playlists(), null);
     }

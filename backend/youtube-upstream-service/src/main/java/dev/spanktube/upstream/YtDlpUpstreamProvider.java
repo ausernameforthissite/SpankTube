@@ -48,7 +48,7 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
                     details.channelName(), details.channelHandle(), details.channelCustomPath(), channel.avatarUrl(),
                     channel.subscriberCount(), details.durationSeconds(), details.viewCount(), details.likeCount(),
                     details.publishedAt(), details.thumbnailUrl(), details.formats(), details.subtitles(), details.chapters(),
-                    details.madeForKids());
+                    details.madeForKids(), details.streamType(), details.liveDashUrl(), details.liveHlsUrl());
         } catch (UpstreamException error) {
             return details;
         }
@@ -111,6 +111,22 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
             }
             ChannelDetails channel = channel(channelId, cursor);
             return new SearchResults(channel.videos(), channel.nextCursor());
+        }
+    }
+
+    @Override
+    public SearchResults channelLiveStreams(String channelId, String cursor) {
+        int offset = page(cursor);
+        List<String> arguments = new ArrayList<>(pageArguments(offset));
+        arguments.addAll(List.of("--flat-playlist", "https://www.youtube.com/" + channelPath(channelId) + "/streams"));
+        try {
+            SearchResults results = parser.search(execute(arguments));
+            return new SearchResults(results.items(), nextCursor(results.items(), offset));
+        } catch (UpstreamException error) {
+            if (error.getMessage().contains("does not have a streams tab")) {
+                return new SearchResults(List.of(), null);
+            }
+            throw error;
         }
     }
 

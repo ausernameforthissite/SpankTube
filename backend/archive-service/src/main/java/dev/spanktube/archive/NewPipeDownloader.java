@@ -63,7 +63,7 @@ class NewPipeDownloader implements ArchiveDownloader {
                 Path track = directory.resolve("video-track" + extension(selection.video().mimeType()));
                 Files.deleteIfExists(track);
                 ensureTimeRemaining(deadline);
-                mediaClient.downloadTrack(metadata.videoId(), selection.video().formatId(), track,
+                mediaClient.downloadTrack(metadata.videoId(), selection.video().trackId(), track,
                         size(selection.video(), metadata.durationSeconds()), ArchiveModels.Stage.DOWNLOADING_VIDEO,
                         tracker, progress);
                 inputs.add(track);
@@ -72,7 +72,7 @@ class NewPipeDownloader implements ArchiveDownloader {
                 Path track = directory.resolve("audio-track" + extension(selection.audio().mimeType()));
                 Files.deleteIfExists(track);
                 ensureTimeRemaining(deadline);
-                mediaClient.downloadTrack(metadata.videoId(), selection.audio().formatId(), track,
+                mediaClient.downloadTrack(metadata.videoId(), selection.audio().trackId(), track,
                         size(selection.audio(), metadata.durationSeconds()), ArchiveModels.Stage.DOWNLOADING_AUDIO,
                         tracker, progress);
                 inputs.add(track);
@@ -135,11 +135,17 @@ class NewPipeDownloader implements ArchiveDownloader {
             if (!options.audioOnly()) {
                 for (int index = 0; index < subtitles.size(); index++) {
                     command.addAll(List.of("-map", trackInputs + index + ":0"));
+                    UpstreamClient.SubtitleOption subtitle = source.subtitles().get(index);
+                    trackMetadata(command, "s:" + index, subtitle.language(), subtitle.label());
                 }
             }
             int metadataIndex = inputs.size() - 1;
             command.addAll(List.of("-map_metadata", String.valueOf(metadataIndex),
                     "-map_chapters", String.valueOf(metadataIndex)));
+            UpstreamClient.FormatOption audio = selection.audio() == null ? selection.video() : selection.audio();
+            if (audio != null) {
+                trackMetadata(command, "a:0", audio.language(), audio.label());
+            }
             Instant publicationDate = PublicationDate.parse(metadata.publishedAt());
             if (publicationDate != null) {
                 command.addAll(List.of("-metadata", "creation_time=" + publicationDate));
@@ -158,7 +164,14 @@ class NewPipeDownloader implements ArchiveDownloader {
                 org.slf4j.LoggerFactory.getLogger(NewPipeDownloader.class)
                         .warn("Unable to archive thumbnail for {}: {}", metadata.videoId(), error.getMessage());
             }
-            return inspect(output, options);
+            ArchiveModels.DownloadedFile result = inspect(output, options);
+            for (Path input : inputs) {
+                Files.deleteIfExists(input);
+            }
+            for (Path subtitle : subtitles) {
+                Files.deleteIfExists(subtitle);
+            }
+            return result;
         } catch (IOException error) {
             throw new ArchiveDownloadException("Unable to write NewPipe archive: " + error.getMessage(), error);
         }
@@ -179,6 +192,18 @@ class NewPipeDownloader implements ArchiveDownloader {
         processes.discard(directory);
     }
 
+    private static void trackMetadata(List<String> command, String selector, String language, String label) {
+        if (language != null && !language.isBlank()) {
+            String isoLanguage = java.util.Locale.forLanguageTag(language).getISO3Language();
+            if (!isoLanguage.isBlank()) {
+                command.addAll(List.of("-metadata:s:" + selector, "language=" + isoLanguage));
+            }
+        }
+        if (label != null && !label.isBlank()) {
+            command.addAll(List.of("-metadata:s:" + selector, "title=" + label));
+        }
+    }
+
     private void writeInfoJson(UpstreamClient.VideoDownload source, UpstreamClient.Selection selection,
             ArchiveModels.DownloadOptions options, Path output) throws IOException {
         ArchiveModels.ExistingVideo metadata = source.metadata();
@@ -196,6 +221,11 @@ class NewPipeDownloader implements ArchiveDownloader {
         String formatId = options.audioOnly() ? selection.audio().formatId()
                 : selection.video().formatId() + (selection.audio() == null ? "" : "+" + selection.audio().formatId());
         info.put("format_id", formatId);
+        if (selection.audio() != null) {
+            info.put("audio_track_id", selection.audio().trackId());
+            info.put("audio_language", selection.audio().language());
+            info.put("audio_label", selection.audio().label());
+        }
         if (selection.audio() != null && selection.audio().bitrate() != null) {
             info.put("abr", selection.audio().bitrate() / 1000.0);
         }

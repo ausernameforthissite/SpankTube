@@ -19,8 +19,23 @@ class WatchProgressHandlerTest {
         CatalogClient catalog = mock(CatalogClient.class);
         when(catalog.existing("viewer", "3TYZjVzWazE"))
                 .thenReturn(Optional.of(mock(ArchiveModels.ExistingVideo.class)));
-        WatchProgressHandler handler = new WatchProgressHandler(mock(EventSubscriber.class), jobs, catalog,
-                mock(UserClient.class));
+        UserClient users = mock(UserClient.class);
+        when(users.autoArchive("viewer")).thenReturn(true);
+        WatchProgressHandler handler = new WatchProgressHandler(mock(EventSubscriber.class), jobs, catalog, users);
+
+        handler.archiveIfNeeded(new WatchProgressHandler.WatchProgressEvent(
+                "viewer", "3TYZjVzWazE", 30, 600, 5)).block();
+
+        verify(jobs, never()).enqueue(any());
+    }
+
+    @Test
+    void disabledAutomaticArchivingDoesNotCreateJob() {
+        ArchiveJobService jobs = mock(ArchiveJobService.class);
+        UserClient users = mock(UserClient.class);
+        when(users.autoArchive("viewer")).thenReturn(false);
+        WatchProgressHandler handler = new WatchProgressHandler(mock(EventSubscriber.class), jobs,
+                mock(CatalogClient.class), users);
 
         handler.archiveIfNeeded(new WatchProgressHandler.WatchProgressEvent(
                 "viewer", "3TYZjVzWazE", 30, 600, 5)).block();

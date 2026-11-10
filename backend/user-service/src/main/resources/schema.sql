@@ -13,6 +13,7 @@ alter table user_settings add column if not exists prefer_best_quality boolean n
 alter table user_settings add column if not exists theme text not null default 'system';
 alter table user_settings add column if not exists avatar bytea;
 alter table user_settings add column if not exists avatar_content_type text;
+alter table user_settings add column if not exists auto_archive boolean not null default true;
 
 create table if not exists local_users (
     username text primary key,

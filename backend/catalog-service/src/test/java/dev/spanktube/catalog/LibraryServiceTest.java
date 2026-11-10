@@ -112,6 +112,20 @@ class LibraryServiceTest {
         verify(repository, never()).hasLink("another", "video");
     }
 
+    @Test
+    void liveRecordingFilenameContainsStartTime() throws Exception {
+        Path file = Files.createDirectories(archiveRoot.resolve("channel/live")).resolve("video.mkv");
+        Files.writeString(file, "video");
+        ArchiveCompletedEvent event = new ArchiveCompletedEvent("viewer", "channel", "Channel", null,
+                null, null, null, "live", "Live", "2026-11-09T21:30:00Z", 10L,
+                "channel/live/video.mkv", "LIVE_RECORDING", 5L);
+        when(repository.existing("viewer", "live")).thenReturn(event);
+
+        assertThat(service().file("viewer", "live").filename())
+                .contains("2026-11-09_21-30-00Z")
+                .endsWith(".mkv");
+    }
+
     private LibraryService service() {
         return new LibraryService(repository, quotaClient, archiveRoot.toString());
     }

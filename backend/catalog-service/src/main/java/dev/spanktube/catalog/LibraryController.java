@@ -79,6 +79,11 @@ class LibraryController {
         return ResponseEntity.noContent().build();
     }
 
+    @GetMapping("/internal/v1/library/playlist-ids")
+    List<String> playlistIds(@RequestParam String username, @RequestParam String channelId) {
+        return libraryService.playlistIds(username, channelId);
+    }
+
     @GetMapping("/internal/v1/library/existing/{videoId}")
     ResponseEntity<ArchiveCompletedEvent> existing(@PathVariable String videoId, @RequestParam String username) {
         ArchiveCompletedEvent event = libraryService.existing(username, videoId);

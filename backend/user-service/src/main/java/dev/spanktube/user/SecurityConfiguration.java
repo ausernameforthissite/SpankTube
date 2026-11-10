@@ -42,7 +42,7 @@ class SecurityConfiguration {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/register",
-                                "/actuator/health", "/internal/v1/**").permitAll()
+                                "/actuator/health", "/internal/v1/**", "/error").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(authentication)))
                 .httpBasic(AbstractHttpConfigurer::disable)

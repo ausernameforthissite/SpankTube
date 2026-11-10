@@ -15,6 +15,10 @@ final class MediaUrlValidator {
         return allowedUrl(value, false);
     }
 
+    static URI manifestUrl(String value) {
+        return value == null ? null : allowedUrl(value, true);
+    }
+
     static URI subtitleUrl(String value) {
         return allowedUrl(value, true);
     }

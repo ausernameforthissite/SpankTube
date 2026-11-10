@@ -116,6 +116,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/channels/{channelId}/streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ChannelLiveStreams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/channels/{channelId}/playlists": {
         parameters: {
             query?: never;
@@ -372,6 +388,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videos/{videoId}/recording": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2LiveRecording"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/recording/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startStage2LiveRecording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{videoId}/recording/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["stopStage2LiveRecording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{videoId}/download": {
         parameters: {
             query?: never;
@@ -414,6 +478,70 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["saveStage2Video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["estimateStage2Archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/estimate/{estimateId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ArchiveEstimateProgress"];
+        put?: never;
+        post?: never;
+        delete: operations["cancelStage2ArchiveEstimate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/estimate/{estimateId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamStage2ArchiveEstimateProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/channel-status/{channelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStage2ChannelArchiveStatus"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -736,6 +864,12 @@ export interface components {
             thumbnailUrl: string | null;
             /** @description YouTube Kids marker confirmed by the dedicated upstream client */
             madeForKids?: boolean;
+            /**
+             * @default VIDEO_STREAM
+             * @enum {string}
+             */
+            streamType: "VIDEO_STREAM" | "AUDIO_STREAM" | "LIVE_STREAM" | "AUDIO_LIVE_STREAM" | "POST_LIVE_STREAM" | "POST_LIVE_AUDIO_STREAM";
+            /** @description DASH manifest for videos and broadcast recordings; live.m3u8 for an active live stream without DASH */
             manifestUrl: string;
             formats: components["schemas"]["Format"][];
             subtitles: components["schemas"]["Subtitle"][];
@@ -754,12 +888,21 @@ export interface components {
             bitrate?: number | null;
             hasVideo: boolean;
             hasAudio: boolean;
+            /** @description unique media-service track identifier */
+            trackId?: string;
+            language?: string | null;
+            label?: string | null;
+            original?: boolean | null;
+            /** @default false */
+            autoGenerated: boolean;
             segmentUrl: string;
         };
         Subtitle: {
             trackId: string;
             language: string;
             label: string;
+            /** @default false */
+            autoGenerated: boolean;
             /** @description media-service URL */
             url: string;
         };
@@ -785,6 +928,11 @@ export interface components {
             viewCount?: number | null;
             /** @description Publication date or ISO timestamp when available */
             publishedAt?: string | null;
+            /**
+             * @default VIDEO_STREAM
+             * @enum {string}
+             */
+            streamType: "VIDEO_STREAM" | "AUDIO_STREAM" | "LIVE_STREAM" | "AUDIO_LIVE_STREAM" | "POST_LIVE_STREAM" | "POST_LIVE_AUDIO_STREAM";
         };
         SearchResults: {
             items: components["schemas"]["SearchItem"][];
@@ -894,6 +1042,34 @@ export interface components {
             /** @default true */
             sponsorBlock: boolean;
         };
+        /** @description Exact Shaka variant selected when recording starts; omitted values select the best available quality */
+        LiveRecordingRequest: {
+            height?: number | null;
+            /** Format: int64 */
+            bandwidth?: number | null;
+        };
+        LiveRecording: {
+            /** Format: uuid */
+            id: string;
+            videoId: string;
+            ownerUsername: string;
+            /** @enum {string} */
+            status: "RECORDING" | "STOPPING" | "COMPLETED" | "FAILED";
+            title: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** Format: int64 */
+            bytesDownloaded: number;
+            /** Format: int64 */
+            durationSeconds?: number | null;
+            /** @description MKV filename containing the UTC recording start time */
+            fileName?: string | null;
+            /** @description Available after the recording is finalized and registered in the library */
+            downloadUrl?: string | null;
+            error?: string | null;
+        };
         ArchiveAvailability: {
             archived: boolean;
             downloadUrl?: string | null;
@@ -945,6 +1121,8 @@ export interface components {
         };
         UserSettings: {
             /** @default true */
+            autoArchive: boolean;
+            /** @default true */
             autoplay: boolean;
             /** @default false */
             hideTechnicalDetails: boolean;
@@ -957,11 +1135,100 @@ export interface components {
             theme: "system" | "light" | "dark";
         };
         SettingsPatch: {
+            autoArchive?: boolean;
             autoplay?: boolean;
             hideTechnicalDetails?: boolean;
             preferBestQuality?: boolean;
             /** @enum {string} */
             theme?: "system" | "light" | "dark";
+        };
+        ArchiveEstimateRequest: {
+            /** @enum {string} */
+            kind: "PLAYLIST" | "CHANNEL";
+            targetId: string;
+            /**
+             * Format: uuid
+             * @description Optional client-generated id used for SSE estimation progress and cancellation
+             */
+            estimateId?: string;
+        };
+        ArchiveEstimate: {
+            /** Format: uuid */
+            estimateId: string;
+            /** @enum {string} */
+            kind: "PLAYLIST" | "CHANNEL";
+            targetId: string;
+            owner: string;
+            totalVideoCount: number;
+            newVideoCount: number;
+            existingVideoCount: number;
+            /** Format: int64 */
+            videoBytes: number;
+            /** Format: int64 */
+            audioBytes: number;
+            /** Format: int64 */
+            totalBytes: number;
+            /** Format: int64 */
+            estimatedSeconds: number;
+            /** Format: int64 */
+            videoBps: number;
+            /** Format: int64 */
+            audioBps: number;
+            videoIds: string[];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ArchiveEstimateProgress: {
+            /** Format: uuid */
+            estimateId: string;
+            /** @enum {string} */
+            kind: "PLAYLIST" | "CHANNEL";
+            targetId: string;
+            owner: string;
+            /** @enum {string} */
+            status: "COLLECTING" | "ESTIMATING" | "COMPLETED" | "FAILED" | "CANCELLED";
+            totalVideoCount: number;
+            processedVideoCount: number;
+            newVideoCount: number;
+            existingVideoCount: number;
+            /** Format: int64 */
+            videoBytes: number;
+            /** Format: int64 */
+            audioBytes: number;
+            /** Format: int64 */
+            totalBytes: number;
+            /** Format: int64 */
+            estimatedSeconds: number;
+            /** Format: int64 */
+            videoBps: number;
+            /** Format: int64 */
+            audioBps: number;
+            /** @description Videos found on opened pages during collection; may include cross-playlist duplicates until the final merge */
+            discoveredVideoCount: number;
+            /** @description Last opened or analysed page within this estimation */
+            pageNumber: number;
+            /** @description Videos assigned to the current page for analysis */
+            pageVideoCount: number;
+            /** @description Videos not yet analysed on the current page */
+            remainingOnPage: number;
+            /**
+             * Format: double
+             * @description Completed video analyses divided by elapsed analysis time
+             */
+            videosPerSecond: number;
+            error?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ChannelArchiveStatus: {
+            /** Format: date-time */
+            lastArchivedAt: string | null;
+            /** @description Unarchived videos published after lastArchivedAt */
+            newVideoCount: number;
+            /** @description Channel playlists not present in the user's archive; YouTube does not expose their creation date */
+            newPlaylistCount: number;
         };
         ArchiveJob: {
             /** Format: uuid */
@@ -1253,6 +1520,30 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Channel videos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+        };
+    };
+    getStage2ChannelLiveStreams: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live streams and completed broadcasts */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1650,6 +1941,97 @@ export interface operations {
             };
         };
     };
+    getStage2LiveRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current or most recent recording owned by this user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveRecording"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    startStage2LiveRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LiveRecordingRequest"];
+            };
+        };
+        responses: {
+            /** @description Active recording reused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveRecording"];
+                };
+            };
+            /** @description Recording started in the background */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveRecording"];
+                };
+            };
+            409: components["responses"]["Error"];
+        };
+    };
+    stopStage2LiveRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                videoId: components["parameters"]["VideoId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recording finalized */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveRecording"];
+                };
+            };
+            /** @description Recording is being finalized */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveRecording"];
+                };
+            };
+            409: components["responses"]["Error"];
+        };
+    };
     downloadStage2Video: {
         parameters: {
             query?: never;
@@ -1747,9 +2129,131 @@ export interface operations {
             };
         };
     };
-    saveStage2Playlist: {
+    estimateStage2Archive: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveEstimateRequest"];
+            };
+        };
+        responses: {
+            /** @description Estimated bytes and download time before the user confirms a batch archive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveEstimate"];
+                };
+            };
+            /** @description Estimation was cancelled before a result became available */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getStage2ArchiveEstimateProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimateId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current collection and per-video estimation progress for the owner */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveEstimateProgress"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    cancelStage2ArchiveEstimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimateId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active estimation cancelled; queued videos will not be requested */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    streamStage2ArchiveEstimateProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                estimateId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-only SSE stream. Page and video events carry ArchiveEstimateProgress JSON; ping is a heartbeat. Disconnect before a terminal event cancels the estimate. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getStage2ChannelArchiveStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Last channel archive time and new videos/playlists since it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelArchiveStatus"];
+                };
+            };
+        };
+    };
+    saveStage2Playlist: {
+        parameters: {
+            query: {
+                estimateId: string;
+            };
             header?: never;
             path: {
                 playlistId: components["parameters"]["PlaylistId"];
@@ -1771,7 +2275,9 @@ export interface operations {
     };
     saveStage2Channel: {
         parameters: {
-            query?: never;
+            query: {
+                estimateId: string;
+            };
             header?: never;
             path: {
                 channelId: components["parameters"]["ChannelId"];

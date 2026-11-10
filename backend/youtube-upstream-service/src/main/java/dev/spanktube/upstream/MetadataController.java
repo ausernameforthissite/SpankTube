@@ -63,6 +63,13 @@ class MetadataController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    @GetMapping("/api/v1/channels/{channelId}/streams")
+    Mono<SearchResults> channelLiveStreams(@PathVariable String channelId,
+            @RequestParam(required = false) String cursor) {
+        return Mono.fromCallable(() -> provider.channelLiveStreams(channelId, cursor))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
     @GetMapping("/api/v1/channels/{channelId}/playlists")
     Mono<SearchResults> channelPlaylists(@PathVariable String channelId,
             @RequestParam(required = false) String cursor) {
@@ -88,8 +95,16 @@ class MetadataController {
     }
 
     @GetMapping("/internal/v1/channels/{channelId}/videos")
-    Mono<SearchResults> internalChannelVideos(@PathVariable String channelId) {
-        return Mono.fromCallable(() -> provider.channelVideos(channelId, null)).subscribeOn(Schedulers.boundedElastic());
+    Mono<SearchResults> internalChannelVideos(@PathVariable String channelId,
+            @RequestParam(required = false) String cursor) {
+        return Mono.fromCallable(() -> provider.channelVideos(channelId, cursor)).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/internal/v1/channels/{channelId}/streams")
+    Mono<SearchResults> internalChannelLiveStreams(@PathVariable String channelId,
+            @RequestParam(required = false) String cursor) {
+        return Mono.fromCallable(() -> provider.channelLiveStreams(channelId, cursor))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @GetMapping("/internal/v1/playlists/{playlistId}")
@@ -98,9 +113,10 @@ class MetadataController {
     }
 
     @GetMapping("/internal/v1/playlists/{playlistId}/videos")
-    Mono<SearchResults> internalPlaylistVideos(@PathVariable String playlistId) {
-        return Mono.fromCallable(() -> provider.playlist(playlistId, null))
-                .map(playlist -> new SearchResults(playlist.items(), null))
+    Mono<SearchResults> internalPlaylistVideos(@PathVariable String playlistId,
+            @RequestParam(required = false) String cursor) {
+        return Mono.fromCallable(() -> provider.playlist(playlistId, cursor))
+                .map(playlist -> new SearchResults(playlist.items(), playlist.nextCursor()))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 }

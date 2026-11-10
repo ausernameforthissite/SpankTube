@@ -65,6 +65,12 @@ class CatalogClient {
         }
     }
 
+    java.util.List<String> archivedPlaylistIds(String username, String channelId) {
+        return client.get().uri("/internal/v1/library/playlist-ids?username={username}&channelId={channelId}",
+                        username, channelId)
+                .retrieve().body(new org.springframework.core.ParameterizedTypeReference<java.util.List<String>>() { });
+    }
+
     void registerPlaylist(String username, String playlistId, String title, String channelId,
             java.util.List<String> videoIds) {
         client.post()

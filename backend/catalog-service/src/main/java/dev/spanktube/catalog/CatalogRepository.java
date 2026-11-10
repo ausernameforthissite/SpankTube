@@ -221,10 +221,16 @@ class CatalogRepository {
                 rs.getLong("video_count"), List.of((String[]) rs.getArray("video_ids").getArray()));
     }
 
+    List<String> playlistIds(String username, String channelId) {
+        return jdbc.query("select playlist_id from library_playlists where user_id = ? and channel_id = ?",
+                (rs, rowNum) -> rs.getString("playlist_id"), username, channelId);
+    }
+
     List<LibraryModels.LibraryPlaylist> playlists(String username, String channelId) {
         String sql = "select lp.playlist_id, lp.title, count(distinct lpi.video_id), "
                 + "('/media/playlist/' || lp.playlist_id || '/archive-thumbnail') as thumbnail_url, "
-                + "array_agg(distinct lpi.video_id) as video_ids from library_playlists lp "
+                + "coalesce(array_agg(distinct lpi.video_id) filter (where lpi.video_id is not null), '{}') as video_ids "
+                + "from library_playlists lp "
                 + "left join library_playlist_items lpi on lpi.user_id = lp.user_id and lpi.playlist_id = lp.playlist_id "
                 + "where lp.channel_id = ?" + (username == null ? "" : " and lp.user_id = ?")
                 + " group by lp.playlist_id, lp.title order by lp.title";
@@ -232,7 +238,8 @@ class CatalogRepository {
         return jdbc.query(sql, parameters, (rs, rowNum) -> {
             java.sql.Array ids = rs.getArray("video_ids");
             return new LibraryModels.LibraryPlaylist(rs.getString("playlist_id"), rs.getString("title"), rs.getLong(3),
-                    rs.getString("thumbnail_url"), ids == null ? List.of() : List.of((String[]) ids.getArray()));
+                    rs.getString("thumbnail_url"), ids == null ? List.of()
+                            : java.util.Arrays.stream((String[]) ids.getArray()).filter(java.util.Objects::nonNull).toList());
         });
     }
 

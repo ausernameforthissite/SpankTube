@@ -1,6 +1,7 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import shaka from "shaka-player/dist/shaka-player.compiled.js";
 import { AppHeader, type HeaderSearchType } from "./AppHeader";
+import { ArchiveEstimateDialog } from "./ArchiveEstimateDialog";
 import { animalAvatar } from "./animalAvatar";
 import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
@@ -15,7 +16,9 @@ import { SettingsMenu } from "./SettingsMenu";
 import { UserMenu } from "./UserMenu";
 import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
-import type { ApiFetch, ArchiveAvailability, ArchiveVersion, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserPlaylist, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
+import { useLiveRecording } from "./useLiveRecording";
+import { VideoDescription } from "./VideoDescription";
+import type { ApiFetch, ArchiveAvailability, ArchiveEstimate, ArchiveEstimateProgress, ArchiveVersion, ChannelArchiveStatus, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserPlaylist, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -40,8 +43,10 @@ type Video = Omit<BaseVideo, "formats"> & {
   sponsorBlock?: { startSeconds: number; endSeconds: number; category: string }[];
   dislikeCountEstimate?: number;
 };
+type ChannelTab = "videos" | "streams" | "playlists";
 type SearchItem = {
   kind: "video" | "channel" | "playlist";
+  streamType?: import("./types").StreamType;
   id: string;
   title: string;
   url: string;
@@ -73,7 +78,7 @@ type UserQuota = {
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
 };
-type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | "cardMenu" | "playlistPicker" | "playlistCreate" | null;
+type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | "cardMenu" | "playlistPicker" | "playlistCreate" | "archiveEstimate" | null;
 
 const STORAGE_KEY = "spanktube.session";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -105,6 +110,13 @@ async function responseError(response: Response): Promise<RequestError> {
   } catch {
     return new RequestError(`HTTP ${response.status}`);
   }
+}
+
+function newEstimateId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function formatDuration(seconds: number | null | undefined): string {
@@ -168,6 +180,7 @@ function archiveVideo(version: ArchiveVersion): Video {
     likeCount: null,
     publishedAt: version.publishedAt || "",
     manifestUrl: `/media/v/${version.videoId}/manifest.mpd`,
+    streamType: "VIDEO_STREAM",
     formats: [],
     subtitles: [],
     sponsorBlock: [],
@@ -194,7 +207,7 @@ function videoSearchItem(video: Video): SearchItem {
   return { kind: "video", id: video.videoId, title: video.title, url: `/watch?v=${video.videoId}`,
     thumbnailUrl: video.thumbnailUrl || `/media/v/${video.videoId}/thumbnail`, channelName: video.channelName,
     durationSeconds: video.durationSeconds ?? null, videoCount: null,
-    publishedAt: video.publishedAt, viewCount: video.viewCount };
+    publishedAt: video.publishedAt, viewCount: video.viewCount, streamType: video.streamType };
 }
 
 function readLocation() {
@@ -235,8 +248,9 @@ export default function App() {
   const activeArchiveDurationRef = useRef<number | null>(null);
   const historySelectionRef = useRef(false);
   const [channel, setChannel] = useState<ChannelPage | null>(null);
-  const [channelTab, setChannelTab] = useState<"videos" | "playlists">(
-    location.query.get("tab") === "playlists" ? "playlists" : "videos");
+  const [channelArchiveStatus, setChannelArchiveStatus] = useState<ChannelArchiveStatus | null>(null);
+  const [channelTab, setChannelTab] = useState<ChannelTab>(
+    location.query.get("tab") === "playlists" ? "playlists" : location.query.get("tab") === "streams" ? "streams" : "videos");
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [userPlaylistDetails, setUserPlaylistDetails] = useState<UserPlaylist | null>(null);
   const [userPlaylists, setUserPlaylists] = useState<UserPlaylist[]>([]);
@@ -244,6 +258,15 @@ export default function App() {
   const [playlistTitle, setPlaylistTitle] = useState("");
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [archiveCandidate, setArchiveCandidate] = useState<{ path: string; title: string;
+    kind: "PLAYLIST" | "CHANNEL"; targetId: string } | null>(null);
+  const [archiveEstimate, setArchiveEstimate] = useState<ArchiveEstimate | null>(null);
+  const [archiveEstimateProgress, setArchiveEstimateProgress] = useState<ArchiveEstimateProgress | null>(null);
+  const [archiveEstimateId, setArchiveEstimateId] = useState<string | null>(null);
+  const [archiveEstimateLoading, setArchiveEstimateLoading] = useState(false);
+  const archiveEstimateAbortRef = useRef<AbortController | null>(null);
+  const archiveEstimateStreamAbortRef = useRef<AbortController | null>(null);
+  const archiveEstimateActiveRef = useRef<string | null>(null);
   const pageCursors = useRef<Record<string, Record<number, string | null>>>({});
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchNextCursor, setSearchNextCursor] = useState<string | null>(null);
@@ -251,7 +274,8 @@ export default function App() {
   const [archiveLocations, setArchiveLocations] = useState<Record<string, LibraryLocation>>({});
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
-  const [settings, setSettings] = useState<UserSettings>({ autoplay: true, hideTechnicalDetails: false, preferBestQuality: true, theme: "system" });
+  const [settings, setSettings] = useState<UserSettings>({ autoArchive: true, autoplay: true,
+    hideTechnicalDetails: false, preferBestQuality: true, theme: "system" });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
   const watchProgressRef = useRef(watchProgress);
@@ -266,6 +290,7 @@ export default function App() {
   const [theater, setTheater] = useState(false);
   const [qualityTracks, setQualityTracks] = useState<QualityTrack[]>([]);
   const [selectedQuality, setSelectedQuality] = useState<"best" | "auto" | number>("best");
+  const [playbackRate, setPlaybackRate] = useState(1);
   const playerRef = useRef<shaka.Player | null>(null);
   const controlsReady = playerReady || mediaReady;
   const authenticated = session !== null;
@@ -276,10 +301,10 @@ export default function App() {
   const metadataSupported = Boolean(watchId) || location.path === "/playlist"
     || location.path.startsWith("/channel/") || location.path.startsWith("/c/") || location.path.startsWith("/@");
   const metadataKey = watchId ? `video:${watchId}` : location.path === "/playlist"
-    ? `playlist:${location.query.get("list")}` : location.path;
+    ? `playlist:${location.query.get("list")}` : `${location.path}:${channelTab}`;
   const metadataSession = useMemo(() => `metadata-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [location]);
-  useEffect(() => setChannelTab(location.query.get("tab") === "playlists" ? "playlists" : "videos"), [metadataKey]);
+  useEffect(() => setChannelTab(location.query.get("tab") === "playlists" ? "playlists" : location.query.get("tab") === "streams" ? "streams" : "videos"), [metadataKey]);
   const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [watchId, requestedStart]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
@@ -363,17 +388,19 @@ export default function App() {
   }, []);
 
   const apiFetch = useCallback<ApiFetch>(async (path, init = {}) => {
+    const { expectedStatuses = [], ...requestInit } = init;
     const token = await ensureAccessToken();
-    const headers = new Headers(init.headers);
+    const headers = new Headers(requestInit.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-    if (!response.ok) throw await responseError(response);
+    if (requestInit.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...requestInit, headers });
+    if (!response.ok && !expectedStatuses.includes(response.status)) throw await responseError(response);
     return response;
   }, [ensureAccessToken]);
 
   const reportProgress = useCallback(async () => {
-    if (!videoElement || !watchId || !Number.isFinite(videoElement.duration) || videoElement.duration <= 0) return;
+    if (!videoElement || !watchId || video?.streamType === "LIVE_STREAM" || video?.streamType === "AUDIO_LIVE_STREAM"
+      || !Number.isFinite(videoElement.duration) || videoElement.duration <= 0) return;
     const duration = Math.floor(videoElement.duration);
     const position = Math.max(0, Math.min(Math.floor(videoElement.currentTime), duration));
     const progress: WatchProgress = {
@@ -394,7 +421,7 @@ export default function App() {
       });
     } catch {
     }
-  }, [videoElement, watchId, apiFetch]);
+  }, [videoElement, video?.streamType, watchId, apiFetch]);
 
   const syncMediaReady = useCallback(() => {
     if (videoElement?.currentSrc && videoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
@@ -412,6 +439,12 @@ export default function App() {
       window.removeEventListener("pageshow", syncMediaReady);
     };
   }, [videoElement, syncMediaReady]);
+
+  useEffect(() => {
+    if (!videoElement) return;
+    videoElement.defaultPlaybackRate = playbackRate;
+    videoElement.playbackRate = playbackRate;
+  }, [videoElement, playbackRate]);
 
   const playbackLogs = usePlaybackLogs(watchId, playbackSession,
     Boolean(session) && !controlsReady, apiFetch);
@@ -448,6 +481,9 @@ export default function App() {
   }, []);
 
   const { jobs, beforeYou } = useQueue(Boolean(session), apiFetch);
+  const activeLive = video?.streamType === "LIVE_STREAM" || video?.streamType === "AUDIO_LIVE_STREAM";
+  const { recording, busy: recordingBusy, toggle: toggleRecording } = useLiveRecording(
+    watchId, apiFetch, showError, notify, () => setError(null));
 
   const navigate = useCallback((url: string, preservePopup = false) => {
     window.history.pushState({}, "", url);
@@ -456,11 +492,14 @@ export default function App() {
     window.scrollTo(0, 0);
   }, []);
 
-  const selectChannelTab = useCallback((tab: "videos" | "playlists") => {
+  const selectChannelTab = useCallback((tab: ChannelTab) => {
     setChannelTab(tab);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", tab);
-    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+    params.delete("page");
+    params.delete("cursor");
+    window.history.pushState({}, "", `${window.location.pathname}?${params.toString()}`);
+    setLocation(readLocation());
   }, []);
 
   const rememberPage = useCallback((key: string, page: number, cursor: string | null, nextCursor: string | null) => {
@@ -729,6 +768,7 @@ export default function App() {
         if (!historySelectionRef.current) setVideo(youtubeVideo);
         const archivedDuration = activeArchiveDurationRef.current;
         if (archivedDuration !== null && youtubeVideo.durationSeconds !== null
+          && youtubeVideo.streamType !== "LIVE_STREAM" && youtubeVideo.streamType !== "AUDIO_LIVE_STREAM"
           && archivedDuration !== youtubeVideo.durationSeconds && !refreshJobRef.current) {
           const refreshResponse = await apiFetch(`/api/v1/videos/${id}/refresh`, { method: "POST" });
           const refreshJob = await refreshResponse.json() as QueueJob;
@@ -775,11 +815,19 @@ export default function App() {
           : path.startsWith("/c/") ? path.substring(3) : path.substring(1);
         const cursor = currentPage === 1 ? null : query.get("cursor");
         const params = new URLSearchParams({ logSession: metadataSession });
-        if (cursor) params.set("cursor", cursor);
+        if (cursor && channelTab === "videos") params.set("cursor", cursor);
         const response = await apiFetch(`/api/v1/channels/${encodeURIComponent(id)}?${params.toString()}`);
         const data = await response.json() as ChannelPage;
-        rememberPage(metadataKey, currentPage, cursor, data.nextCursor);
-        setChannel(data);
+        if (channelTab === "streams") {
+          const streamParams = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+          const streams = await apiFetch(`/api/v1/channels/${encodeURIComponent(id)}/streams${streamParams}`)
+            .then(result => result.json() as Promise<SearchResults>);
+          rememberPage(metadataKey, currentPage, cursor, streams.nextCursor);
+          setChannel({ ...data, videos: streams.items, nextCursor: streams.nextCursor, totalPages: null });
+        } else {
+          rememberPage(metadataKey, currentPage, cursor, data.nextCursor);
+          setChannel(data);
+        }
       } else if (path === "/search") {
         const q = (query.get("q") || "").trim();
         const type = (query.get("type") || "all") as HeaderSearchType;
@@ -896,7 +944,9 @@ export default function App() {
       player.addEventListener("error", event => showError((event as CustomEvent<unknown>).detail));
       const manifestParams = new URLSearchParams({ playbackSession });
       if (playbackVersion) manifestParams.set("version", playbackVersion);
-      const manifestUrl = `${MEDIA_BASE_URL}/media/v/${watchId}/manifest.mpd?${manifestParams}`;
+      const manifestPath = video?.manifestUrl?.startsWith("/media/")
+        ? video.manifestUrl : `/media/v/${watchId}/manifest.mpd`;
+      const manifestUrl = `${MEDIA_BASE_URL}${manifestPath}?${manifestParams}`;
       if (progressiveRemux) {
         setPlaybackStatus("Подготовка DASH из прогрессивного MP4…");
         const prepared = await fetch(manifestUrl, {
@@ -927,7 +977,8 @@ export default function App() {
         .sort((left, right) => (right.height || 0) - (left.height || 0) || right.bandwidth - left.bandwidth);
       setQualityTracks(tracks);
       if (selectedQuality === "best" && tracks.length > 0) {
-        player.selectVariantTrack(tracks[0], true);
+        const original = tracks.find(track => track.audioRoles?.includes("main")) || tracks[0];
+        player.selectVariantTrack(original, true);
       } else if (typeof selectedQuality === "number") {
         const selected = tracks.find(track => track.id === selectedQuality);
         if (selected) player.selectVariantTrack(selected, true);
@@ -939,6 +990,7 @@ export default function App() {
           await videoElement.play();
         } catch (reason) {
           if (reason instanceof DOMException && reason.name === "NotAllowedError") {
+            setControlsOverlayVisible(true);
             setPlaybackStatus("Нажмите «Играть»");
           } else {
             showError(reason);
@@ -1096,14 +1148,167 @@ export default function App() {
       .catch(showError);
   }, [jobs, watchId, apiFetch, applyArchive, showError]);
 
-  const saveCollection = async (path: string) => {
+  const stopArchiveEstimate = useCallback((keepalive: boolean) => {
+    const estimateId = archiveEstimateActiveRef.current;
+    archiveEstimateActiveRef.current = null;
+    archiveEstimateAbortRef.current?.abort();
+    archiveEstimateAbortRef.current = null;
+    archiveEstimateStreamAbortRef.current?.abort();
+    archiveEstimateStreamAbortRef.current = null;
+    if (!estimateId) return;
+    const path = `/api/v1/archive/estimate/${encodeURIComponent(estimateId)}`;
+    if (keepalive) {
+      const token = sessionRef.current?.accessToken;
+      if (token) {
+        void fetch(`${API_BASE_URL}${path}`, {
+          method: "DELETE", headers: { Authorization: `Bearer ${token}` }, keepalive: true,
+        }).catch(() => {});
+      }
+      return;
+    }
+    void apiFetch(path, { method: "DELETE" }).catch(() => {});
+  }, [apiFetch]);
+
+  const saveCollection = async (path: string, kind: "PLAYLIST" | "CHANNEL", title: string, targetId: string) => {
     setError(null);
+    stopArchiveEstimate(false);
+    const controller = new AbortController();
+    archiveEstimateAbortRef.current = controller;
+    const estimateId = newEstimateId();
+    archiveEstimateActiveRef.current = estimateId;
+    setArchiveCandidate({ path, title, kind, targetId });
+    setArchiveEstimate(null);
+    setArchiveEstimateId(estimateId);
+    setArchiveEstimateProgress(null);
+    setArchiveEstimateLoading(true);
+    setPopup("archiveEstimate");
     try {
-      const response = await apiFetch(path, { method: "POST" });
+      const response = await apiFetch("/api/v1/archive/estimate", {
+        method: "POST", body: JSON.stringify({ kind, targetId, estimateId }), signal: controller.signal,
+      });
+      if (response.status === 204) {
+        if (archiveEstimateActiveRef.current === estimateId) archiveEstimateActiveRef.current = null;
+        setPopup(null);
+        setArchiveCandidate(null);
+        return;
+      }
+      setArchiveEstimate(await response.json() as ArchiveEstimate);
+      if (archiveEstimateActiveRef.current === estimateId) archiveEstimateActiveRef.current = null;
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setPopup(null);
+      showError(reason);
+    } finally {
+      if (archiveEstimateAbortRef.current === controller) {
+        archiveEstimateAbortRef.current = null;
+        setArchiveEstimateLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!archiveEstimateId || !archiveEstimateLoading) return;
+    let stopped = false;
+    let abort: AbortController | null = null;
+    let retry: number | undefined;
+    const listen = async () => {
+      abort = new AbortController();
+      archiveEstimateStreamAbortRef.current = abort;
+      try {
+        const response = await apiFetch(`/api/v1/archive/estimate/${archiveEstimateId}/events`, { signal: abort.signal });
+        if (!response.body) throw new Error("SSE stream is unavailable");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!stopped) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split(/\r?\n\r?\n/);
+          buffer = blocks.pop() || "";
+          for (const block of blocks) {
+            const event = block.split(/\r?\n/).find(line => line.startsWith("event:"))?.slice(6).trim();
+            if (event !== "page" && event !== "video" && event !== "progress"
+              && event !== "completed" && event !== "failed" && event !== "cancelled") continue;
+            const text = block.split(/\r?\n/).filter(line => line.startsWith("data:"))
+              .map(line => line.slice(5).trimStart()).join("\n");
+            if (!text) continue;
+            const next = JSON.parse(text) as ArchiveEstimateProgress;
+            if (!stopped) setArchiveEstimateProgress(next);
+          }
+        }
+      } catch (reason) {
+        if (stopped || (reason instanceof DOMException && reason.name === "AbortError")) return;
+      } finally {
+        if (archiveEstimateStreamAbortRef.current === abort) archiveEstimateStreamAbortRef.current = null;
+      }
+      if (!stopped) retry = window.setTimeout(listen, 1000);
+    };
+    void listen();
+    return () => {
+      stopped = true;
+      if (retry) window.clearTimeout(retry);
+      abort?.abort();
+      if (archiveEstimateStreamAbortRef.current === abort) archiveEstimateStreamAbortRef.current = null;
+    };
+  }, [apiFetch, archiveEstimateId, archiveEstimateLoading]);
+
+  useEffect(() => {
+    const leave = () => stopArchiveEstimate(true);
+    window.addEventListener("beforeunload", leave);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("beforeunload", leave);
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [authenticated, location, stopArchiveEstimate]);
+
+  useEffect(() => {
+    const channelId = channel?.channelId;
+    setChannelArchiveStatus(null);
+    if (!channelId) return;
+    let cancelled = false;
+    apiFetch(`/api/v1/archive/channel-status/${channelId}`)
+      .then(response => response.json() as Promise<ChannelArchiveStatus>)
+      .then(status => {
+        if (!cancelled) setChannelArchiveStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setChannelArchiveStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, channel?.channelId]);
+
+  const cancelArchiveEstimate = () => {
+    stopArchiveEstimate(false);
+    setPopup(null);
+    setArchiveCandidate(null);
+    setArchiveEstimate(null);
+    setArchiveEstimateId(null);
+    setArchiveEstimateProgress(null);
+    setArchiveEstimateLoading(false);
+  };
+
+  const confirmArchiveCollection = async () => {
+    if (!archiveCandidate || !archiveEstimate) return;
+    setArchiveEstimateLoading(true);
+    try {
+      const response = await apiFetch(`${archiveCandidate.path}?estimateId=${encodeURIComponent(archiveEstimate.estimateId)}`,
+        { method: "POST" });
       if (response.status === 202) notify("Пакетная архивация поставлена в очередь");
       else notify("Эта архивация уже идёт");
+      setArchiveCandidate(null);
+      setArchiveEstimate(null);
+      setArchiveEstimateId(null);
+      setArchiveEstimateProgress(null);
+      setPopup(null);
     } catch (reason) {
       showError(reason);
+    } finally {
+      setArchiveEstimateLoading(false);
     }
   };
 
@@ -1209,13 +1414,17 @@ export default function App() {
       return;
     }
     player.configure("abr.enabled", false);
+    const activeAudioId = player.getVariantTracks().find(track => track.active)?.audioId;
     if (value === "best") {
       setSelectedQuality("best");
-      if (qualityTracks.length > 0) player.selectVariantTrack(qualityTracks[0], true);
+      const preferred = qualityTracks.find(track => track.audioId === activeAudioId)
+        || qualityTracks.find(track => track.audioRoles?.includes("main")) || qualityTracks[0];
+      if (preferred) player.selectVariantTrack(preferred, true);
       return;
     }
     const id = Number(value);
-    const track = qualityTracks.find(candidate => candidate.id === id);
+    const track = qualityTracks.find(candidate => candidate.id === id && candidate.audioId === activeAudioId)
+      || qualityTracks.find(candidate => candidate.id === id);
     if (track) {
       setSelectedQuality(id);
       player.selectVariantTrack(track, true);
@@ -1236,6 +1445,12 @@ export default function App() {
     if (controlsClickTimer.current) clearTimeout(controlsClickTimer.current);
     controlsClickTimer.current = null;
   }, []);
+
+  const keepControlsVisible = useCallback(() => {
+    cancelControlsClick();
+    lastControlsPointerRef.current = Date.now();
+    setControlsOverlayVisible(true);
+  }, [cancelControlsClick]);
 
   const showSeekEffect = useCallback((offset: number) => {
     if (!videoElement) return;
@@ -1352,8 +1567,10 @@ export default function App() {
           <form onSubmit={login}>
             {registration && <input value={inviteCode} onChange={event => setInviteCode(event.target.value.trim())}
               placeholder="Код приглашения" aria-label="Код приглашения" required />}
-            <input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" aria-label="Логин" required />
-            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={registration ? "new-password" : "current-password"} placeholder="Пароль" aria-label="Пароль" required />
+            <input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" aria-label="Логин" aria-describedby={registration ? "username-requirements" : undefined} required />
+            {registration && <small id="username-requirements" className="muted auth-field-hint">Имя пользователя — от 3 до 32 символов; латинские буквы, цифры, точка, дефис и подчёркивание.</small>}
+            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={registration ? "new-password" : "current-password"} placeholder="Пароль" aria-label="Пароль" aria-describedby={registration ? "password-requirements" : undefined} required />
+            {registration && <small id="password-requirements" className="muted auth-field-hint">Длина пароля — от 8 до 128 символов.</small>}
             <button type="submit">{registration ? "Зарегистрироваться" : "Войти"}</button>
           </form>
           <button className="link" onClick={() => { setRegistration(current => !current); setError(null); }}>
@@ -1421,7 +1638,22 @@ export default function App() {
                   syncMediaReady();
                   setPlaybackStatus("Воспроизведение");
                 }}
-                onWaiting={() => setPlaybackStatus("Буферизация")}
+                onWaiting={event => {
+                  if (event.currentTarget.paused) {
+                    setControlsOverlayVisible(true);
+                    setPlaybackStatus("Нажмите «Играть»");
+                  } else {
+                    setPlaybackStatus("Буферизация…");
+                  }
+                }}
+                onStalled={event => {
+                  if (!event.currentTarget.paused) setPlaybackStatus("Буферизация…");
+                }}
+                onError={event => {
+                  const code = event.currentTarget.error?.code;
+                  setPlaybackStatus(`Ошибка видео${code ? ` ${code}` : ""}`);
+                  showError(new Error(`Видео не удалось декодировать (код ${code ?? "неизвестен"})`));
+                }}
                 onEmptied={() => setMediaReady(false)}
                 onPause={() => {
                   syncMediaReady();
@@ -1446,24 +1678,47 @@ export default function App() {
               {videoElement && controlsOverlayVisible && controlsReady && <PlayerControls
                 video={videoElement} player={playerRef.current} position={playbackPosition}
                 sponsorSegments={video?.sponsorBlock || []} autoplay={settings.autoplay}
-                qualityTracks={qualityTracks} selectedQuality={selectedQuality} theater={theater}
+                qualityTracks={qualityTracks} selectedQuality={selectedQuality} playbackRate={playbackRate} theater={theater}
                 onTogglePlayback={togglePlayback} onSeek={seekTo} onSelectQuality={selectQuality}
+                onPlaybackRateChange={setPlaybackRate}
                 onToggleAutoplay={() => void updateSettings({ autoplay: !settings.autoplay })}
-                onToggleTheater={() => setTheater(current => !current)} onError={showError} />}
+                onToggleTheater={() => setTheater(current => !current)} onInteraction={keepControlsVisible}
+                onError={showError} />}
               {!controlsReady && <PlaybackLog lines={loading && !archiveFile && metadataLogs.length > 0
                 ? metadataLogs : playbackLogs} />}
             </div>
             <div className="playback">
-              {video && <>
+              {video && (activeLive ? <>
+                <button type="button" className="secondary recording-button"
+                  disabled={recordingBusy || recording?.status === "STOPPING"}
+                  aria-label={recording?.status === "STOPPING" ? "Остановка записи…" : recording?.status === "RECORDING" ? "Остановить запись" : "Начать запись"}
+                  title={recording?.status === "STOPPING" ? "Остановка записи…" : recording?.status === "RECORDING" ? "Остановить запись" : "Начать запись"}
+                  onClick={() => {
+                    const track = playerRef.current?.getVariantTracks().find(candidate => candidate.active);
+                    void toggleRecording({ height: track?.height ?? null, bandwidth: track?.bandwidth ?? null });
+                  }}>
+                  <span className={recording?.status === "RECORDING" || recording?.status === "STOPPING"
+                    ? "recording-stop-icon" : "recording-start-icon"} aria-hidden="true" />
+                  {recording?.status === "STOPPING" ? "Остановка записи…" : recording?.status === "RECORDING" ? "Остановить запись" : "Начать запись"}
+                </button>
+                {recording?.status === "COMPLETED" && recording.downloadUrl && <button type="button" className="secondary"
+                  onClick={() => void downloadBlob(recording.downloadUrl!, recording.fileName || "recording.mkv")}>Скачать запись</button>}
+              </> : <>
                 {archiveFile
                   ? <button type="button" className="secondary" onClick={() => void downloadBlob(archiveFile.downloadUrl, archiveFile.filename)}>Скачать из архива</button>
-                  : <button type="button" className="secondary" onClick={archive}>Архивировать</button>}
+                  : <button type="button" className="secondary" disabled={video.streamType === "LIVE_STREAM" || video.streamType === "AUDIO_LIVE_STREAM"}
+                    title={video.streamType === "LIVE_STREAM" || video.streamType === "AUDIO_LIVE_STREAM" ? "Активный эфир нельзя архивировать" : undefined}
+                    onClick={archive}>Архивировать</button>}
                 {archiveFile && <button type="button" className="secondary" onClick={event => void openHistory(event.currentTarget)}>История <span className="split-arrow-icon">▼</span></button>}
                 <div className="split-button">
-                  <button type="button" className="secondary" onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
-                  <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания" onClick={event => togglePopup("download", event.currentTarget)}>▼</button>
+                  <button type="button" className="secondary" disabled={video.streamType === "LIVE_STREAM" || video.streamType === "AUDIO_LIVE_STREAM"}
+                    title={video.streamType === "LIVE_STREAM" || video.streamType === "AUDIO_LIVE_STREAM" ? "Активный эфир нельзя скачивать" : undefined}
+                    onClick={() => download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true })}>Скачать</button>
+                  <button type="button" className="secondary split-arrow" aria-label="Выбрать формат скачивания"
+                    disabled={video.streamType === "LIVE_STREAM" || video.streamType === "AUDIO_LIVE_STREAM"}
+                    onClick={event => togglePopup("download", event.currentTarget)}>▼</button>
                 </div>
-              </>}
+              </>)}
               {playbackLogs.length > 0 && <button type="button" className="playback-log-latest"
                 aria-label="Открыть журнал подготовки видео" title={playbackLogs[playbackLogs.length - 1].text}
                 onClick={event => togglePopup("playbackLog", event.currentTarget)}>
@@ -1479,7 +1734,7 @@ export default function App() {
             </div>
             <h2>{video.title}</h2>
             <p className="stats">Публикация: {publicationDate(video.publishedAt)} · {formatDuration(video.durationSeconds)} · {video.viewCount == null ? "—" : `${number.format(video.viewCount)} просмотров`} · {video.likeCount == null ? "—" : `${number.format(video.likeCount)} лайков`}{video.dislikeCountEstimate == null ? "" : ` · ≈${number.format(video.dislikeCountEstimate)} дизлайков`}</p>
-            <p className="description">{video.description || "Описание отсутствует"}</p>
+            <VideoDescription description={video.description || "Описание отсутствует"} navigate={navigate} />
             <details>
               <summary>Форматы ({video.formats.length}), субтитры ({video.subtitles.length}), SponsorBlock ({video.sponsorBlock?.length || 0})</summary>
               <div className="formats">
@@ -1524,7 +1779,7 @@ export default function App() {
             <button className="link" data-nav-url={playlist.channel.url} onClick={() => navigate(playlist.channel.url)}>{playlist.channel.title}</button>
           </div>
           <div className="playlist-heading"><h2>{playlist.title}</h2>
-            <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`)}>Архивировать</button>
+            <button className="secondary" onClick={() => saveCollection(`/api/v1/playlists/${playlist.playlistId}/save`, "PLAYLIST", playlist.title, playlist.playlistId)}>Архивировать</button>
           </div>
           <ResultGrid items={playlist.items} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
           <Pagination page={currentPage} totalPages={playlist.totalPages} hasNext={Boolean(playlist.nextCursor)}
@@ -1539,16 +1794,26 @@ export default function App() {
               <img className="avatar large" src={channel.avatarUrl} alt="" />
               <div className="channel-title"><h2>{channel.title}</h2><p className="muted">{channel.subscriberCount == null ? "" : `${number.format(channel.subscriberCount)} подписчиков`}</p></div>
             </div>
-            <button className="secondary channel-archive" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`)}>Архивировать канал</button>
+            <div className="channel-archive-actions">
+              <button className="secondary channel-archive" onClick={() => saveCollection(`/api/v1/channels/${channel.channelId}/save`, "CHANNEL", channel.title, channel.channelId)}>Архивировать канал</button>
+              {channelArchiveStatus?.lastArchivedAt && <div className="channel-archive-meta muted">
+                <span>Последняя архивация: {new Date(channelArchiveStatus.lastArchivedAt).toLocaleDateString("ru-RU")}</span>
+                {channelArchiveStatus.newVideoCount > 0 && <span>Новых видео: {channelArchiveStatus.newVideoCount}</span>}
+                {channelArchiveStatus.newPlaylistCount > 0 && <span>Плейлистов вне архива: {channelArchiveStatus.newPlaylistCount}</span>}
+              </div>}
+            </div>
           </div>
           <div className="channel-tabs" role="tablist" aria-label="Содержимое канала">
             <button role="tab" className={channelTab === "videos" ? "channel-tab active" : "channel-tab"}
               aria-selected={channelTab === "videos"} onClick={() => selectChannelTab("videos")}>Видео</button>
+            <button role="tab" className={channelTab === "streams" ? "channel-tab active" : "channel-tab"}
+              aria-selected={channelTab === "streams"} onClick={() => selectChannelTab("streams")}>Трансляции</button>
             <button role="tab" className={channelTab === "playlists" ? "channel-tab active" : "channel-tab"}
               aria-selected={channelTab === "playlists"} onClick={() => selectChannelTab("playlists")}>Плейлисты</button>
           </div>
-          {channelTab === "videos" ? <>
-            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />
+          {channelTab !== "playlists" ? <>
+            <ResultGrid items={channel.videos} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu}
+              broadcastBadges={channelTab === "streams"} />
             <Pagination page={currentPage} totalPages={channel.totalPages} hasNext={Boolean(channel.nextCursor)}
               loading={loading} canOpen={canOpenPage} onOpen={openPage} />
           </> : <ResultGrid items={channel.playlists} navigate={navigate} progressMap={watchProgress} archiveLocations={archiveLocations} onArchiveOpen={openArchivedVideo} onMenu={openCardMenu} />}
@@ -1589,9 +1854,23 @@ export default function App() {
             else navigate(url);
           }} />}
         {popup === "cardMenu" && menuVideo && <CardContextMenu
+          downloadsDisabled={menuVideo.streamType === "LIVE_STREAM" || menuVideo.streamType === "AUDIO_LIVE_STREAM"}
           onAdd={openPlaylistPicker}
-          onArchive={() => { setPopup(null); void archiveById(menuVideo.id); }}
+          onArchive={() => {
+            setPopup(null);
+            if (menuVideo.kind === "playlist") {
+              void saveCollection(`/api/v1/playlists/${menuVideo.id}/save`, "PLAYLIST", menuVideo.title, menuVideo.id);
+            } else if (menuVideo.kind === "channel") {
+              void saveCollection(`/api/v1/channels/${menuVideo.id}/save`, "CHANNEL", menuVideo.title, menuVideo.id);
+            } else {
+              void archiveById(menuVideo.id);
+            }
+          }}
           onDownload={() => { setPopup(null); void download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true }, menuVideo.id); }} />}
+        {popup === "archiveEstimate" && archiveCandidate && <ArchiveEstimateDialog title={archiveCandidate.title}
+          estimate={archiveEstimate} progress={archiveEstimateProgress}
+          loading={archiveEstimateLoading} onCancel={cancelArchiveEstimate}
+          onConfirm={() => void confirmArchiveCollection()} />}
         {popup === "playlistPicker" && <PlaylistPicker playlists={userPlaylists} query={playlistQuery}
           onQuery={setPlaylistQuery} onSelect={playlist => void addToPlaylist(playlist)}
           onCreate={() => setPopup("playlistCreate")} onClose={() => setPopup(null)} />}
@@ -1619,13 +1898,14 @@ function withPlaylistOrigin(item: SearchItem): string {
   return `${item.url}&from=${encodeURIComponent(from)}`;
 }
 
-function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveOpen, onMenu }: {
+function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveOpen, onMenu, broadcastBadges = false }: {
   items: SearchItem[];
   navigate: (url: string) => void;
   progressMap: WatchProgressMap;
   archiveLocations: Record<string, LibraryLocation>;
   onArchiveOpen: (videoId: string) => void;
   onMenu: (item: SearchItem, anchor: HTMLElement) => void;
+  broadcastBadges?: boolean;
 }) {
   return (
     <div className="result-grid">
@@ -1637,6 +1917,11 @@ function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveO
           <div className="result-thumbnail">
             <a className="result-thumbnail-link" href={url} onClick={event => { event.preventDefault(); navigate(url); }}>
               {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
+              {broadcastBadges && (item.streamType === "LIVE_STREAM" || item.streamType === "AUDIO_LIVE_STREAM"
+                ? <span className="broadcast-badge live" title="Идёт прямой эфир"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4M2.7 2.7a13 13 0 0 0 0 18.6M21.3 2.7a13 13 0 0 1 0 18.6" /></svg>В эфире</span>
+                : item.streamType === "POST_LIVE_STREAM" || item.streamType === "POST_LIVE_AUDIO_STREAM"
+                ? <span className="broadcast-badge replay" title="Завершённая трансляция"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 5v6h6M12 7v5l3 2" /></svg>Запись эфира</span>
+                : null)}
               {item.kind === "video" && item.durationSeconds != null
                 && <span className="result-duration-overlay">{formatDuration(item.durationSeconds)}</span>}
             </a>

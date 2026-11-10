@@ -25,6 +25,11 @@ export function SettingsMenu({ settings, onChange, onClose, avatarUrl, onAvatarU
           onChange={event => onChange({ autoplay: event.target.checked })} />
       </label>
       <label className="switch-row">
+        <span>Автоматически архивировать видео</span>
+        <input type="checkbox" role="switch" checked={settings.autoArchive}
+          onChange={event => onChange({ autoArchive: event.target.checked })} />
+      </label>
+      <label className="switch-row">
         <span>Всегда выбирать лучшее качество</span>
         <input type="checkbox" role="switch" checked={settings.preferBestQuality}
           onChange={event => onChange({ preferBestQuality: event.target.checked })} />

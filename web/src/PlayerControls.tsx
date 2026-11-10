@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type shaka from "shaka-player/dist/shaka-player.compiled.js";
 import type { SponsorSegment } from "./types";
+import { PlayerSettingsMenu } from "./PlayerSettingsMenu";
 
 type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
 
@@ -43,8 +44,8 @@ function formatDuration(seconds: number): string {
 }
 
 export function PlayerControls({ video, player, position, sponsorSegments, autoplay, qualityTracks,
-  selectedQuality, theater, onTogglePlayback, onSeek, onSelectQuality, onToggleAutoplay,
-  onToggleTheater, onError }: {
+  selectedQuality, playbackRate, theater, onTogglePlayback, onSeek, onSelectQuality, onPlaybackRateChange,
+  onToggleAutoplay, onToggleTheater, onInteraction, onError }: {
   video: HTMLVideoElement;
   player: shaka.Player | null;
   position: number;
@@ -52,12 +53,15 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
   autoplay: boolean;
   qualityTracks: QualityTrack[];
   selectedQuality: "best" | "auto" | number;
+  playbackRate: number;
   theater: boolean;
   onTogglePlayback: () => void;
   onSeek: (position: number) => void;
   onSelectQuality: (value: string) => void;
+  onPlaybackRateChange: (value: number) => void;
   onToggleAutoplay: () => void;
   onToggleTheater: () => void;
+  onInteraction: () => void;
   onError: (reason: unknown) => void;
 }) {
   const [paused, setPaused] = useState(video.paused);
@@ -65,8 +69,10 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(video.volume);
   const [muted, setMuted] = useState(video.muted);
-  const [subtitleCount, setSubtitleCount] = useState(0);
-  const [subtitlesVisible, setSubtitlesVisible] = useState(false);
+  const [subtitleTracks, setSubtitleTracks] = useState<shaka.extern.TextTrack[]>([]);
+  const [selectedSubtitle, setSelectedSubtitle] = useState("off");
+  const [audioTracks, setAudioTracks] = useState<QualityTrack[]>([]);
+  const [selectedAudio, setSelectedAudio] = useState<number | "">("");
   const [fullscreen, setFullscreen] = useState(false);
   const audibleVolume = useRef(video.volume || 1);
 
@@ -97,14 +103,49 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
   }, [video]);
 
   useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 640px)");
+    const apply = () => {
+      if (mobile.matches) {
+        video.volume = 1;
+        video.muted = false;
+      }
+    };
+    apply();
+    mobile.addEventListener("change", apply);
+    return () => mobile.removeEventListener("change", apply);
+  }, [video]);
+
+  useEffect(() => {
     if (!player) {
-      setSubtitleCount(0);
-      setSubtitlesVisible(false);
+      setSubtitleTracks([]);
+      setAudioTracks([]);
+      setSelectedSubtitle("off");
+      setSelectedAudio("");
       return;
     }
+    const automatic = (label: string | null | undefined) => (label || "").toLowerCase().includes("auto");
     const sync = () => {
-      setSubtitleCount(player.getTextTracks().length);
-      setSubtitlesVisible(Array.from(video.textTracks).some(track => track.mode === "showing"));
+      const texts = player.getTextTracks().slice().sort((left, right) =>
+        Number(automatic(right.label)) - Number(automatic(left.label))
+        || (left.label || left.language).localeCompare(right.label || right.language));
+      setSubtitleTracks(texts);
+      const activeText = texts.find(track => track.active);
+      const showing = Array.from(video.textTracks).some(track => track.mode === "showing");
+      setSelectedSubtitle(showing && activeText ? String(activeText.id) : "off");
+      const unique = new Map<number, QualityTrack>();
+      for (const track of player.getVariantTracks()) {
+        if (track.audioId && !unique.has(track.audioId)) unique.set(track.audioId, track);
+      }
+      const audio = Array.from(unique.values()).sort((left, right) => {
+        const leftPriority = left.audioRoles?.includes("main") ? 0 : automatic(left.label) ? 2 : 1;
+        const rightPriority = right.audioRoles?.includes("main") ? 0 : automatic(right.label) ? 2 : 1;
+        return leftPriority - rightPriority
+          || (left.label || left.language).localeCompare(right.label || right.language);
+      });
+      setAudioTracks(audio);
+      const active = audio.find(track => track.active)
+        || audio.find(track => track.audioRoles?.includes("main")) || audio[0];
+      setSelectedAudio(active?.audioId ?? "");
     };
     sync();
     player.addEventListener("trackschanged", sync);
@@ -130,18 +171,31 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
     if (value > 0) audibleVolume.current = value;
   };
 
-  const toggleSubtitles = () => {
-    if (!player || subtitleCount === 0) return;
-    const next = !subtitlesVisible;
-    const tracks = player.getTextTracks();
-    if (next && !tracks.some(track => track.active)) {
-      const language = navigator.language.toLowerCase();
-      const preferred = tracks.find(track => track.language.toLowerCase().startsWith(language))
-        || tracks.find(track => track.language.toLowerCase().startsWith(language.split("-")[0])) || tracks[0];
-      player.selectTextTrack(preferred);
+  const selectAudio = (audioId: number) => {
+    if (!player) return;
+    const variants = player.getVariantTracks();
+    const activeVideo = variants.find(track => track.active && track.videoId);
+    const candidates = variants.filter(track => track.audioId === audioId);
+    const selected = candidates.find(track => track.videoId === activeVideo?.videoId) || candidates[0];
+    if (selected) {
+      player.selectVariantTrack(selected, true);
+      setSelectedAudio(audioId);
     }
-    player.setTextTrackVisibility(next);
-    setSubtitlesVisible(next);
+  };
+
+  const changeSubtitles = (value: string) => {
+    if (!player) return;
+    if (value === "off") {
+      player.setTextTrackVisibility(false);
+      setSelectedSubtitle("off");
+      return;
+    }
+    const track = subtitleTracks.find(candidate => String(candidate.id) === value);
+    if (track) {
+      player.selectTextTrack(track);
+      player.setTextTrackVisibility(true);
+      setSelectedSubtitle(value);
+    }
   };
 
   const toggleFullscreen = async () => {
@@ -159,6 +213,9 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
 
   return (
     <div className="player-controls" onClick={event => event.stopPropagation()}
+      onClickCapture={onInteraction}
+      onPointerDown={event => { event.stopPropagation(); onInteraction(); }}
+      onPointerUp={event => event.stopPropagation()}
       onMouseDown={event => { if (event.detail > 1) event.preventDefault(); }}
       onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); }}>
       <div className="player-timeline">
@@ -220,20 +277,12 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
             <svg viewBox="0 0 24 24" aria-hidden="true"><path className="filled" d="M8 5v14l11-7z" /><path d="M4 4v16" /></svg>
             <span aria-hidden="true">{autoplay ? "ON" : "OFF"}</span>
           </button>
-          <select className="player-quality" aria-label="Качество видео" value={selectedQuality}
-            disabled={qualityTracks.length === 0} onChange={event => onSelectQuality(event.target.value)}>
-            <option value="best">Лучшее</option><option value="auto">Авто</option>
-            {qualityTracks.map(track => <option key={track.id} value={track.id}>
-              {track.height}p · {Math.round(track.bandwidth / 1000)} kbps
-            </option>)}
-          </select>
-          <button className={`player-icon-button${subtitlesVisible ? " active" : ""}`}
-            aria-label={subtitlesVisible ? "Выключить субтитры" : "Включить субтитры"}
-            aria-pressed={subtitlesVisible} disabled={subtitleCount === 0}
-            title={subtitleCount === 0 ? "Субтитры недоступны" : subtitlesVisible ? "Выключить субтитры" : "Включить субтитры"}
-            onClick={toggleSubtitles}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 10h3m4 0h3M7 14h3m4 0h3" /></svg>
-          </button>
+          <PlayerSettingsMenu video={video} qualityTracks={qualityTracks}
+            selectedQuality={selectedQuality} playbackRate={playbackRate}
+            audioTracks={audioTracks} selectedAudio={selectedAudio}
+            subtitleTracks={subtitleTracks} selectedSubtitle={selectedSubtitle}
+            onSelectQuality={onSelectQuality} onPlaybackRateChange={onPlaybackRateChange}
+            onSelectAudio={selectAudio} onSelectSubtitle={changeSubtitles} />
           <button className={`player-icon-button${theater ? " active" : ""}`}
             aria-label={theater ? "Выйти из театрального режима" : "Театральный режим"}
             aria-pressed={theater} title={theater ? "Обычный размер" : "Театральный режим"} onClick={onToggleTheater}>

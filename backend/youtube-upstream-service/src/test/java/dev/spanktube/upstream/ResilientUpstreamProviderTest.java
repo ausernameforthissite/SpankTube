@@ -16,7 +16,8 @@ class ResilientUpstreamProviderTest {
     private final NewPipeUpstreamProvider primary = mock(NewPipeUpstreamProvider.class);
     private final KidsVideoClient kids = mock(KidsVideoClient.class);
     private final YtDlpUpstreamProvider fallback = mock(YtDlpUpstreamProvider.class);
-    private final ResilientUpstreamProvider provider = new ResilientUpstreamProvider(primary, kids, fallback);
+    private final LiveDashClient liveClient = mock(LiveDashClient.class);
+    private final ResilientUpstreamProvider provider = new ResilientUpstreamProvider(primary, kids, fallback, liveClient);
 
     @Test
     void fallsBackWhenVideoIsNotMadeForKids() {
@@ -36,6 +37,28 @@ class ResilientUpstreamProviderTest {
 
         assertThat(provider.video("38a0f-fXZCc")).isSameAs(expected);
         verify(fallback, never()).video("38a0f-fXZCc");
+    }
+
+    @Test
+    void usesVisionOsWhenNewPipeIsBlocked() {
+        VideoDetails expected = mock(VideoDetails.class);
+        when(primary.video("rFZHOHl-L8A")).thenThrow(UpstreamException.antiBot("LOGIN_REQUIRED"));
+        when(liveClient.liveVideo("rFZHOHl-L8A")).thenReturn(Optional.of(expected));
+
+        assertThat(provider.video("rFZHOHl-L8A")).isSameAs(expected);
+        verify(kids, never()).video("rFZHOHl-L8A");
+        verify(fallback, never()).video("rFZHOHl-L8A");
+    }
+
+    @Test
+    void doesNotHideMissingLiveDashWithAnotherAdapter() {
+        when(primary.video("rFZHOHl-L8A")).thenThrow(UpstreamException.dashUnavailable("No live DASH"));
+        when(fallback.video("rFZHOHl-L8A")).thenThrow(UpstreamException.dashUnavailable("No live DASH"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.video("rFZHOHl-L8A"))
+                .isInstanceOfSatisfying(UpstreamException.class,
+                        error -> assertThat(error.reason()).isEqualTo(UpstreamException.Reason.DASH_UNAVAILABLE));
+        verify(liveClient).liveVideo("rFZHOHl-L8A");
     }
 
     @Test

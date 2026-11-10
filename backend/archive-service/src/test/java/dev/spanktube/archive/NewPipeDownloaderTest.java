@@ -45,6 +45,10 @@ class NewPipeDownloaderTest {
         });
         when(sponsorBlockClient.segments("dQw4w9WgXcQ"))
                 .thenReturn(List.of(new SponsorBlockClient.Segment("sponsor", 60, 90)));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Files.writeString(directory.resolve("video.mkv"), "muxed");
+            return null;
+        }).when(processes).run(any(), eq(directory), eq(Duration.ofMinutes(15)), eq(1500L), any(), any());
         UpstreamClient.VideoDownload source = source();
         TestDownloader downloader = new TestDownloader();
 
@@ -64,8 +68,12 @@ class NewPipeDownloaderTest {
         assertThat(command.getValue().getFirst()).isEqualTo("ffmpeg");
         assertThat(command.getValue()).contains("-c:s", "srt");
         assertThat(command.getValue().stream().map(String::valueOf)).doesNotContain("yt-dlp");
-        String chapters = Files.readString(directory.resolve("chapters.ffmeta"));
-        assertThat(chapters).contains("title=Start", "title=sponsor");
+        assertThat(directory.resolve("video-track.mp4")).doesNotExist();
+        assertThat(directory.resolve("audio-track.webm")).doesNotExist();
+        assertThat(directory.resolve("subtitle-en-0.vtt")).doesNotExist();
+        assertThat(directory.resolve("chapters.ffmeta")).doesNotExist();
+        assertThat(directory.resolve("video.mkv")).exists();
+        assertThat(directory.resolve("video.jpg")).exists();
         var info = new ObjectMapper().readTree(directory.resolve("info.json").toFile());
         assertThat(info.path("format_id").asText()).isEqualTo("137+251");
         assertThat(info.path("extractor").asText()).isEqualTo("NewPipeExtractor");
@@ -95,6 +103,71 @@ class NewPipeDownloaderTest {
                 eq(ArchiveModels.Stage.DOWNLOADING_VIDEO), any(), any());
         assertThat(new ObjectMapper().readTree(directory.resolve("info.json").toFile())
                 .path("format_id").asText()).isEqualTo("18");
+    }
+
+    @Test
+    void writesSelectedOriginalTrackMetadataAndKeepsItagCompatibility() throws Exception {
+        when(mediaClient.downloadTrack(anyString(), anyString(), any(), anyLong(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Files.writeString(invocation.getArgument(2, Path.class), "track");
+                    return 5L;
+                });
+        when(mediaClient.downloadResource(anyString(), any())).thenAnswer(invocation -> {
+            Files.writeString(invocation.getArgument(1, Path.class), "resource");
+            return 8L;
+        });
+        when(sponsorBlockClient.segments("dQw4w9WgXcQ")).thenReturn(List.of());
+        var original = new UpstreamClient.FormatOption("251", "audio/webm", "opus", null, null, null,
+                131_000L, false, true, 500L, "251-ru.4", "ru", "Russian original", true, false);
+        var automatic = new UpstreamClient.FormatOption("251", "audio/webm", "opus", null, null, null,
+                131_000L, false, true, 500L, "251-en-US.10-dubbed-auto", "en-US", "English (auto)", false, true);
+        var source = new UpstreamClient.VideoDownload(source().metadata(), 1500,
+                List.of(source().formats().getFirst(), automatic, original), source().subtitles(), source().chapters());
+
+        new TestDownloader().download(source, ArchiveModels.DownloadOptions.archiveDefaults(), directory, 1500,
+                progress -> { });
+
+        verify(mediaClient).downloadTrack(eq("dQw4w9WgXcQ"), eq("251-ru.4"), any(), eq(500L),
+                eq(ArchiveModels.Stage.DOWNLOADING_AUDIO), any(), any());
+        @SuppressWarnings("rawtypes")
+        ArgumentCaptor<List> command = ArgumentCaptor.forClass(List.class);
+        verify(processes).run(command.capture(), eq(directory), eq(Duration.ofMinutes(15)), eq(1500L), any(), any());
+        assertThat(command.getValue()).contains("-metadata:s:a:0", "language=rus", "title=Russian original",
+                "-metadata:s:s:0", "language=eng", "title=English");
+        var info = new ObjectMapper().readTree(directory.resolve("info.json").toFile());
+        assertThat(info.path("format_id").asText()).isEqualTo("137+251");
+        assertThat(info.path("audio_track_id").asText()).isEqualTo("251-ru.4");
+        assertThat(info.path("audio_language").asText()).isEqualTo("ru");
+    }
+
+    @Test
+    void retainsInputTracksWhenMkvValidationFails() {
+        when(mediaClient.downloadTrack(anyString(), anyString(), any(), anyLong(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Files.writeString(invocation.getArgument(2, Path.class), "track");
+                    return 5L;
+                });
+        when(mediaClient.downloadResource(anyString(), any())).thenAnswer(invocation -> {
+            Files.writeString(invocation.getArgument(1, Path.class), "resource");
+            return 8L;
+        });
+        when(sponsorBlockClient.segments("dQw4w9WgXcQ")).thenReturn(List.of());
+        NewPipeDownloader downloader = new NewPipeDownloader(
+                new ArchiveProperties(directory.toString(), 2, 5, Duration.ofHours(1), 2000),
+                mediaClient, sponsorBlockClient, processes, new ObjectMapper(), "ffmpeg") {
+            @Override
+            public ArchiveModels.DownloadedFile inspect(Path output, ArchiveModels.DownloadOptions options) {
+                throw new ArchiveDownloadException("Invalid MKV");
+            }
+        };
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> downloader.download(source(),
+                ArchiveModels.DownloadOptions.archiveDefaults(), directory, 1500, progress -> { }))
+                .isInstanceOf(ArchiveDownloadException.class).hasMessage("Invalid MKV");
+        assertThat(directory.resolve("video-track.mp4")).exists();
+        assertThat(directory.resolve("audio-track.webm")).exists();
+        assertThat(directory.resolve("subtitle-en-0.vtt")).exists();
+        assertThat(directory.resolve("chapters.ffmeta")).exists();
     }
 
     private UpstreamClient.VideoDownload source() {

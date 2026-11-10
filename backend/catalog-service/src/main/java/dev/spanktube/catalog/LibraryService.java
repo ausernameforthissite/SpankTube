@@ -69,6 +69,10 @@ class LibraryService {
         repository.upsertPlaylist(request);
     }
 
+    List<String> playlistIds(String username, String channelId) {
+        return repository.playlistIds(username, channelId);
+    }
+
     long usage(String username) {
         return repository.usage(username);
     }
@@ -297,16 +301,18 @@ class LibraryService {
 
     private String filename(LibraryModels.Video video) {
         return filename(video.title(), video.videoId(), video.height(), video.videoCodec(),
-                audioBitrate(video.archivedPath(), video.audioBitrate()), video.audioCodec());
+                audioBitrate(video.archivedPath(), video.audioBitrate()), video.audioCodec(),
+                video.quality(), video.publishedAt());
     }
 
     private String filename(ArchiveCompletedEvent video) {
         return filename(video.title(), video.videoId(), video.height(), video.videoCodec(),
-                audioBitrate(video.archivedPath(), video.audioBitrate()), video.audioCodec());
+                audioBitrate(video.archivedPath(), video.audioBitrate()), video.audioCodec(),
+                video.quality(), video.publishedAt());
     }
 
     private static String filename(String title, String videoId, Integer height, String videoCodec,
-            Long audioBitrate, String audioCodec) {
+            Long audioBitrate, String audioCodec, String quality, String publishedAt) {
         String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         if (safeTitle.isBlank()) {
             safeTitle = videoId;
@@ -317,6 +323,18 @@ class LibraryService {
         String resolution = videoCodec == null ? "audio" : height == null ? "unknown" : height + "p";
         String bitrate = audioBitrate == null || audioBitrate <= 0 ? "unknown"
                 : Math.max(1, Math.round(audioBitrate / 1000.0)) + "kbps";
+        if ("LIVE_RECORDING".equals(quality)) {
+            String startedAt;
+            try {
+                startedAt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss'Z'")
+                        .withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.parse(publishedAt));
+            } catch (RuntimeException error) {
+                startedAt = "unknown-time";
+            }
+            return safeTitle + " [" + videoId + "] (" + startedAt + ", " + resolution + ", "
+                    + (videoCodec == null ? "none" : videoCodec) + ", " + bitrate + ", "
+                    + (audioCodec == null ? "none" : audioCodec) + ").mkv";
+        }
         return safeTitle + " [" + videoId + "] (" + resolution + ", "
                 + (videoCodec == null ? "none" : videoCodec) + ", " + bitrate + ", "
                 + (audioCodec == null ? "none" : audioCodec) + ").mkv";

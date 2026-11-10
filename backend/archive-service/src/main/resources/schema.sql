@@ -71,3 +71,28 @@ create index if not exists archive_jobs_order_idx on archive_jobs(status, priori
 create index if not exists archive_items_order_idx on archive_job_items(job_id, status, id);
 create index if not exists archive_jobs_download_reuse_idx on archive_jobs(owner_id, kind, target_id, options_key, status);
 create index if not exists archive_jobs_temporary_cleanup_idx on archive_jobs(temporary_file, finished_at);
+
+
+create table if not exists live_recordings (
+    id uuid primary key,
+    owner_id text not null,
+    video_id text not null,
+    status text not null,
+    metadata text not null,
+    manifest_url text not null,
+    started_at timestamptz not null,
+    finished_at timestamptz,
+    bytes_downloaded bigint not null default 0,
+    duration_seconds bigint,
+    file_path text not null,
+    file_name text,
+    error text,
+    updated_at timestamptz not null default now()
+);
+
+alter table live_recordings add column if not exists last_seen_at timestamptz not null default now();
+
+create unique index if not exists live_recordings_active_owner_video_idx
+    on live_recordings(owner_id, video_id) where status in ('RECORDING', 'STOPPING');
+create index if not exists live_recordings_owner_video_idx
+    on live_recordings(owner_id, video_id, started_at desc);

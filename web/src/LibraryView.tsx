@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { CardContextMenu } from "./PlaylistMenus";
 import type { ApiFetch, LibraryItem, LibraryPlaylist, LibraryResponse, WatchProgressMap } from "./types";
 
 function formatDuration(seconds: number): string {
@@ -39,6 +40,9 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
   const videoId = query.get("video");
   const [playlistItems, setPlaylistItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [menuItem, setMenuItem] = useState<LibraryItem | null>(null);
+
+  useEffect(() => setMenuItem(null), [channelId, playlistId, videoId, scope]);
 
   useEffect(() => {
     if (!playlistId || playlistId === "none") {
@@ -90,8 +94,23 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
         <div className="filename">{item.filename}</div>
       </div>
       <div className="row-actions">
-        <button className="secondary" onClick={() => onDownload(item)}>MKV</button>
-        <button className="danger" onClick={() => onRemove(item)}>Удалить</button>
+        <button className="icon-button row-icon-action" aria-label="Скачать MKV" title="Скачать MKV"
+          onClick={() => onDownload(item)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4" /></svg>
+        </button>
+        <button className="icon-button danger row-icon-action" aria-label="Удалить" title="Удалить"
+          onClick={() => onRemove(item)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6m4-6v6" /></svg>
+        </button>
+        <button className="card-menu-button row-menu-button" aria-label="Действия с видео" title="Действия с видео"
+          onClick={() => setMenuItem(current => current?.videoId === item.videoId ? null : item)}>⋮</button>
+        {menuItem?.videoId === item.videoId && <>
+          <button className="library-menu-backdrop" aria-label="Закрыть меню" onClick={() => setMenuItem(null)} />
+          <div className="library-row-menu">
+            <CardContextMenu onDownloadMkv={() => { setMenuItem(null); onDownload(item); }}
+              onRemove={() => { setMenuItem(null); onRemove(item); }} />
+          </div>
+        </>}
       </div>
     </div>)}
   </div>;

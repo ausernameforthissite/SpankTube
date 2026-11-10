@@ -61,6 +61,7 @@ class ArchivePlaybackService {
                             cacheDirectory(videoId, versionId), videoId, filename, null);
                     MediaType type = filename.endsWith(".webm") ? MediaType.parseMediaType("video/webm")
                             : filename.endsWith(".m4s") ? MediaType.parseMediaType("video/mp4")
+                            : filename.endsWith(".vtt") ? MediaType.parseMediaType("text/vtt")
                             : MediaType.APPLICATION_OCTET_STREAM;
                     return ResponseEntity.ok().contentType(type).contentLength(Files.size(file.getFile().toPath()))
                             .cacheControl(CacheControl.maxAge(Duration.ofHours(1))).body(file);

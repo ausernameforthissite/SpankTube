@@ -107,6 +107,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SearchResults' }
+  /api/v1/channels/{channelId}/streams:
+    get:
+      operationId: getStage2ChannelLiveStreams
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Live streams and completed broadcasts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResults' }
   /api/v1/channels/{channelId}/playlists:
     get:
       operationId: getStage2ChannelPlaylists
@@ -333,6 +347,57 @@ paths:
       responses:
         '202':
           description: Progress accepted; archiving starts at 30 seconds or 5 percent
+  /api/v1/videos/{videoId}/recording:
+    get:
+      operationId: getStage2LiveRecording
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '200':
+          description: Current or most recent recording owned by this user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRecording' }
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/videos/{videoId}/recording/start:
+    post:
+      operationId: startStage2LiveRecording
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LiveRecordingRequest' }
+      responses:
+        '200':
+          description: Active recording reused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRecording' }
+        '202':
+          description: Recording started in the background
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRecording' }
+        '409':
+          $ref: '#/components/responses/Error'
+  /api/v1/videos/{videoId}/recording/stop:
+    post:
+      operationId: stopStage2LiveRecording
+      parameters: [{ $ref: '#/components/parameters/VideoId' }]
+      responses:
+        '200':
+          description: Recording finalized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRecording' }
+        '202':
+          description: Recording is being finalized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRecording' }
+        '409':
+          $ref: '#/components/responses/Error'
   /api/v1/videos/{videoId}/download:
     post:
       operationId: downloadStage2Video
@@ -383,10 +448,74 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ArchiveJob' }
+  /api/v1/archive/estimate:
+    post:
+      operationId: estimateStage2Archive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArchiveEstimateRequest' }
+      responses:
+        '200':
+          description: Estimated bytes and download time before the user confirms a batch archive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveEstimate' }
+        '204':
+          description: Estimation was cancelled before a result became available
+  /api/v1/archive/estimate/{estimateId}:
+    get:
+      operationId: getStage2ArchiveEstimateProgress
+      parameters:
+        - { name: estimateId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Current collection and per-video estimation progress for the owner
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchiveEstimateProgress' }
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: cancelStage2ArchiveEstimate
+      parameters:
+        - { name: estimateId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Active estimation cancelled; queued videos will not be requested
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/archive/estimate/{estimateId}/events:
+    get:
+      operationId: streamStage2ArchiveEstimateProgress
+      parameters:
+        - { name: estimateId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Owner-only SSE stream. Page and video events carry ArchiveEstimateProgress JSON; ping is a heartbeat. Disconnect before a terminal event cancels the estimate.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/archive/channel-status/{channelId}:
+    get:
+      operationId: getStage2ChannelArchiveStatus
+      parameters:
+        - { name: channelId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Last channel archive time and new videos/playlists since it
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChannelArchiveStatus' }
   /api/v1/playlists/{playlistId}/save:
     post:
       operationId: saveStage2Playlist
-      parameters: [{ $ref: '#/components/parameters/PlaylistId' }]
+      parameters:
+        - { $ref: '#/components/parameters/PlaylistId' }
+        - { name: estimateId, in: query, required: true, schema: { type: string, format: uuid } }
       responses:
         '202':
           description: First job; each playlist video has an independent queue entry
@@ -396,7 +525,9 @@ paths:
   /api/v1/channels/{channelId}/save:
     post:
       operationId: saveStage2Channel
-      parameters: [{ $ref: '#/components/parameters/ChannelId' }]
+      parameters:
+        - { $ref: '#/components/parameters/ChannelId' }
+        - { name: estimateId, in: query, required: true, schema: { type: string, format: uuid } }
       responses:
         '202':
           description: First job; each channel video has an independent queue entry
@@ -762,7 +893,8 @@ components:
         channelUrl: { type: string, description: SpankTube channel route }
         thumbnailUrl: { type: [string, 'null'], description: media-service URL }
         madeForKids: { type: boolean, description: YouTube Kids marker confirmed by the dedicated upstream client }
-        manifestUrl: { type: string }
+        streamType: { type: string, enum: [VIDEO_STREAM, AUDIO_STREAM, LIVE_STREAM, AUDIO_LIVE_STREAM, POST_LIVE_STREAM, POST_LIVE_AUDIO_STREAM], default: VIDEO_STREAM }
+        manifestUrl: { type: string, description: DASH manifest for videos and broadcast recordings; live.m3u8 for an active live stream without DASH }
         formats:
           type: array
           items: { $ref: '#/components/schemas/Format' }
@@ -786,6 +918,11 @@ components:
         bitrate: { type: [integer, 'null'], format: int64 }
         hasVideo: { type: boolean }
         hasAudio: { type: boolean }
+        trackId: { type: string, description: unique media-service track identifier, including audio language variants }
+        language: { type: [string, 'null'] }
+        label: { type: [string, 'null'] }
+        original: { type: [boolean, 'null'] }
+        autoGenerated: { type: boolean, default: false }
         segmentUrl: { type: string }
     Subtitle:
       type: object
@@ -794,6 +931,7 @@ components:
         trackId: { type: string }
         language: { type: string }
         label: { type: string }
+        autoGenerated: { type: boolean, default: false }
         url: { type: string, description: media-service URL }
     SponsorSegment:
       type: object
@@ -816,6 +954,7 @@ components:
         videoCount: { type: [integer, 'null'] }
         viewCount: { type: [integer, 'null'], format: int64 }
         publishedAt: { type: [string, 'null'], description: Publication date or ISO timestamp when available }
+        streamType: { type: string, enum: [VIDEO_STREAM, AUDIO_STREAM, LIVE_STREAM, AUDIO_LIVE_STREAM, POST_LIVE_STREAM, POST_LIVE_AUDIO_STREAM], default: VIDEO_STREAM }
     SearchResults:
       type: object
       required: [items]
@@ -933,6 +1072,28 @@ components:
         audioFormatId: { type: [string, 'null'], description: Null selects best audio or video-only with a selected video track }
         subtitles: { type: boolean, default: true, description: Human-created subtitles only }
         sponsorBlock: { type: boolean, default: true }
+    LiveRecordingRequest:
+      type: object
+      description: Exact Shaka variant selected when recording starts; omitted values select the best available quality
+      properties:
+        height: { type: [integer, 'null'], minimum: 1 }
+        bandwidth: { type: [integer, 'null'], format: int64, minimum: 1 }
+    LiveRecording:
+      type: object
+      required: [id, videoId, ownerUsername, status, title, startedAt, bytesDownloaded]
+      properties:
+        id: { type: string, format: uuid }
+        videoId: { type: string }
+        ownerUsername: { type: string }
+        status: { type: string, enum: [RECORDING, STOPPING, COMPLETED, FAILED] }
+        title: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        bytesDownloaded: { type: integer, format: int64 }
+        durationSeconds: { type: [integer, 'null'], format: int64 }
+        fileName: { type: [string, 'null'], description: MKV filename containing the UTC recording start time }
+        downloadUrl: { type: [string, 'null'], description: Available after the recording is finalized and registered in the library }
+        error: { type: [string, 'null'] }
     ArchiveAvailability:
       type: object
       required: [archived, version]
@@ -984,8 +1145,9 @@ components:
         usedBy: { type: [string, 'null'] }
     UserSettings:
       type: object
-      required: [autoplay, hideTechnicalDetails, preferBestQuality, theme]
+      required: [autoArchive, autoplay, hideTechnicalDetails, preferBestQuality, theme]
       properties:
+        autoArchive: { type: boolean, default: true }
         autoplay: { type: boolean, default: true }
         hideTechnicalDetails: { type: boolean, default: false }
         preferBestQuality: { type: boolean, default: true }
@@ -994,10 +1156,73 @@ components:
       type: object
       minProperties: 1
       properties:
+        autoArchive: { type: boolean }
         autoplay: { type: boolean }
         hideTechnicalDetails: { type: boolean }
         preferBestQuality: { type: boolean }
         theme: { type: string, enum: [system, light, dark] }
+    ArchiveEstimateRequest:
+      type: object
+      required: [kind, targetId]
+      properties:
+        kind: { type: string, enum: [PLAYLIST, CHANNEL] }
+        targetId: { type: string }
+        estimateId: { type: string, format: uuid, description: Optional client-generated id used for SSE estimation progress and cancellation }
+    ArchiveEstimate:
+      type: object
+      required: [estimateId, kind, targetId, owner, totalVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, videoIds, createdAt]
+      properties:
+        estimateId: { type: string, format: uuid }
+        kind: { type: string, enum: [PLAYLIST, CHANNEL] }
+        targetId: { type: string }
+        owner: { type: string }
+        totalVideoCount: { type: integer }
+        newVideoCount: { type: integer }
+        existingVideoCount: { type: integer }
+        videoBytes: { type: integer, format: int64 }
+        audioBytes: { type: integer, format: int64 }
+        totalBytes: { type: integer, format: int64 }
+        estimatedSeconds: { type: integer, format: int64 }
+        videoBps: { type: integer, format: int64 }
+        audioBps: { type: integer, format: int64 }
+        videoIds:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    ArchiveEstimateProgress:
+      type: object
+      required: [estimateId, kind, targetId, owner, status, totalVideoCount, processedVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, discoveredVideoCount, pageNumber, pageVideoCount, remainingOnPage, videosPerSecond, createdAt, updatedAt]
+      properties:
+        estimateId: { type: string, format: uuid }
+        kind: { type: string, enum: [PLAYLIST, CHANNEL] }
+        targetId: { type: string }
+        owner: { type: string }
+        status: { type: string, enum: [COLLECTING, ESTIMATING, COMPLETED, FAILED, CANCELLED] }
+        totalVideoCount: { type: integer }
+        processedVideoCount: { type: integer }
+        newVideoCount: { type: integer }
+        existingVideoCount: { type: integer }
+        videoBytes: { type: integer, format: int64 }
+        audioBytes: { type: integer, format: int64 }
+        totalBytes: { type: integer, format: int64 }
+        estimatedSeconds: { type: integer, format: int64 }
+        videoBps: { type: integer, format: int64 }
+        audioBps: { type: integer, format: int64 }
+        discoveredVideoCount: { type: integer, description: Videos found on opened pages during collection; may include cross-playlist duplicates until the final merge }
+        pageNumber: { type: integer, description: Last opened or analysed page within this estimation }
+        pageVideoCount: { type: integer, description: Videos assigned to the current page for analysis }
+        remainingOnPage: { type: integer, description: Videos not yet analysed on the current page }
+        videosPerSecond: { type: number, format: double, description: Completed video analyses divided by elapsed analysis time, excluding page collection }
+        error: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ChannelArchiveStatus:
+      type: object
+      required: [lastArchivedAt, newVideoCount, newPlaylistCount]
+      properties:
+        lastArchivedAt: { type: [string, 'null'], format: date-time }
+        newVideoCount: { type: integer, description: Unarchived videos published after lastArchivedAt }
+        newPlaylistCount: { type: integer, description: Channel playlists not present in the user's archive; YouTube does not expose their creation date }
     ArchiveJob:
       type: object
       required: [id, kind, targetId, ownerUsername, ownerRole, priority, status, totalCount, completedCount, failedCount, createdAt, updatedAt, purpose, stage, bytesDownloaded, totalBytes, speedBps, title, options]
