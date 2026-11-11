@@ -26,8 +26,9 @@ public class EgressAutoConfiguration {
 
     @Bean(name = "youtubeHttpClient")
     @ConditionalOnMissingBean(name = "youtubeHttpClient")
-    HttpClient youtubeHttpClient(EgressProperties properties) {
+    HttpClient youtubeHttpClient(EgressProperties properties, MediaRedirectCache redirectCache) {
         HttpClient client = HttpClient.create().metrics(true, uri -> "/")
+                .doOnResponse((response, connection) -> redirectCache.record(response))
                 .doOnRequest((request, connection) -> LOGGER.debug("Egress request host={} connectionHeader={} id={}",
                         URI.create(request.resourceUrl()).getHost(), request.requestHeaders().get(HttpHeaderNames.CONNECTION),
                         connection.channel().id()))
@@ -56,6 +57,12 @@ public class EgressAutoConfiguration {
                 configuredProxy.username(properties.username()).password(username -> properties.password());
             }
         });
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    MediaRedirectCache mediaRedirectCache() {
+        return new MediaRedirectCache();
     }
 
     @Bean(name = "youtubeWebClient")

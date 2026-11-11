@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 import dev.spanktube.egress.EgressProbe;
+import dev.spanktube.egress.MediaRedirectCache;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.FileSystemResource;
@@ -49,19 +50,19 @@ class MediaController {
     private final ProgressiveDashService progressiveDash;
     private final LiveDashService liveDash;
     private final LiveHlsService liveHls;
-    private final MediaRedirectCache redirectCache = new MediaRedirectCache();
+    private final MediaRedirectCache redirectCache;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
             DashManifestGenerator manifestGenerator, @Qualifier("youtubeHttpClient") HttpClient youtubeHttpClient,
-            ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
+            MediaRedirectCache redirectCache, ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
             ThumbnailService thumbnailService, PlaybackLogService playbackLogs, ProgressiveDashService progressiveDash,
             LiveDashService liveDash, LiveHlsService liveHls) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
+        this.redirectCache = redirectCache;
         this.youtubeClient = WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(
-                        youtubeHttpClient.doOnResponse((response, connection) -> redirectCache.record(response))))
+                .clientConnector(new ReactorClientHttpConnector(youtubeHttpClient))
                 .build();
         this.egressProbe = egressProbe.getIfAvailable();
         this.archivePlayback = archivePlayback;

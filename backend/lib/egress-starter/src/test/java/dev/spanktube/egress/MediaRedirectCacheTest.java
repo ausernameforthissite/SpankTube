@@ -1,4 +1,4 @@
-package dev.spanktube.media;
+package dev.spanktube.egress;
 
 import java.net.URI;
 
@@ -26,7 +26,7 @@ class MediaRedirectCacheTest {
     }
 
     @Test
-    void ignoresRedirectsAndRejectsUnexpectedHosts() {
+    void ignoresRedirectsAndUnexpectedHosts() {
         URI original = URI.create("https://rr5.googlevideo.com/videoplayback");
         URI target = URI.create("https://example.com/videoplayback");
         HttpClientResponse redirect = mock(HttpClientResponse.class);
@@ -34,6 +34,7 @@ class MediaRedirectCacheTest {
         when(redirect.resourceUrl()).thenReturn(target.toString());
         when(redirect.redirectedFrom()).thenReturn(new String[]{original.toString()});
         cache.record(redirect);
+        cache.record(response(original, target));
 
         assertThat(cache.resolve(original)).isEqualTo(original);
         assertThat(cache.resolve(URI.create("https://example.com/video"))).isEqualTo(URI.create("https://example.com/video"));

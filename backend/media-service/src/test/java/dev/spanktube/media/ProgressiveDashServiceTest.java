@@ -4,8 +4,11 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import dev.spanktube.egress.MediaRedirectCache;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.FileSystemResource;
@@ -22,23 +25,48 @@ class ProgressiveDashServiceTest {
     Path directory;
 
     @Test
-    void remuxesOnceAndServesCachedSegments() {
+    void servesEarlyManifestWhileRemuxFinishesAndCachesFinalSegments() throws Exception {
         UpstreamVideo video = video();
         UpstreamClient upstream = mock(UpstreamClient.class);
         when(upstream.video(video.videoId())).thenReturn(Mono.just(video));
         TestService service = new TestService(upstream, directory);
 
-        String first = service.manifest(video, "test").block();
-        String second = service.manifest(video, "test").block();
+        String first = service.manifest(video, "test").block(java.time.Duration.ofSeconds(5));
+        assertThat(first).contains("type=\"dynamic\"");
+        assertThat(first).contains("mediaPresentationDuration=\"PT6M30S\"");
+        assertThat(service.downloads).hasValue(1);
+        assertThat(service.remuxes).hasValue(1);
 
-        assertThat(first).isEqualTo("<MPD/>");
-        assertThat(second).isEqualTo(first);
+        service.finishRemux.countDown();
+        assertThat(service.completed.await(5, TimeUnit.SECONDS)).isTrue();
+        String second = service.manifest(video, "test").block(java.time.Duration.ofSeconds(5));
+        assertThat(second).isEqualTo("<MPD type=\"static\"/>");
         assertThat(service.downloads).hasValue(1);
         assertThat(service.remuxes).hasValue(1);
         ResponseEntity<FileSystemResource> response = service.file(video.videoId(), "init-stream0.m4s").block();
         assertThat(response).isNotNull();
         assertThat(response.getBody().exists()).isTrue();
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("video/mp4");
+    }
+
+    @Test
+    void resumesIncompleteManifestAfterRestart() throws Exception {
+        UpstreamVideo video = video();
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        when(upstream.video(video.videoId())).thenReturn(Mono.just(video));
+        Files.createDirectories(directory.resolve("remux"));
+        Files.writeString(directory.resolve("manifest.mpd"), TestService.EARLY_MANIFEST);
+        for (String filename : List.of("init-0.m4s", "init-1.m4s", "chunk-0-00001.m4s", "chunk-1-00001.m4s")) {
+            Files.writeString(directory.resolve("remux").resolve(filename), "partial");
+        }
+        TestService service = new TestService(upstream, directory);
+
+        String manifest = service.manifest(video, "test").block(java.time.Duration.ofSeconds(5));
+
+        assertThat(manifest).contains("type=\"dynamic\"");
+        assertThat(service.downloads).hasValue(1);
+        service.finishRemux.countDown();
+        assertThat(service.completed.await(5, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
@@ -71,14 +99,16 @@ class ProgressiveDashServiceTest {
             UpstreamClient upstream = mock(UpstreamClient.class);
             ProgressiveDashService service = new ProgressiveDashService(
                     org.springframework.web.reactive.function.client.WebClient.builder().build(), upstream,
-                    mock(PlaybackLogService.class), directory.toString(), "ffmpeg");
+                    mock(PlaybackLogService.class), directory.toString(), "ffmpeg", new MediaRedirectCache());
             Path output = directory.resolve("source.mp4");
             Files.writeString(output, "0123456");
 
-            service.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/video.mp4"), output)
-                    .block(java.time.Duration.ofSeconds(10));
+            java.io.ByteArrayOutputStream ffmpegInput = new java.io.ByteArrayOutputStream();
+            service.download(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/video.mp4"), output,
+                    ffmpegInput).block(java.time.Duration.ofSeconds(10));
 
             assertThat(Files.readAllBytes(output)).isEqualTo(content);
+            assertThat(ffmpegInput.toByteArray()).isEqualTo(content);
             assertThat(requests).hasValue(2);
             assertThat(ranges).containsExactly("bytes=7-8388614", "bytes=7-8388614");
         } finally {
@@ -104,34 +134,46 @@ class ProgressiveDashServiceTest {
     }
 
     private static final class TestService extends ProgressiveDashService {
+        private static final String EARLY_MANIFEST = """
+                <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic">
+                  <Period><AdaptationSet><Representation id="0"><SegmentTemplate>
+                    <SegmentTimeline><S t="0" d="12800"/></SegmentTimeline>
+                  </SegmentTemplate></Representation></AdaptationSet>
+                  <AdaptationSet><Representation id="1"><SegmentTemplate>
+                    <SegmentTimeline><S t="0" d="44100"/></SegmentTimeline>
+                  </SegmentTemplate></Representation></AdaptationSet></Period>
+                </MPD>
+                """;
         private final AtomicInteger downloads = new AtomicInteger();
         private final AtomicInteger remuxes = new AtomicInteger();
+        private final CountDownLatch finishRemux = new CountDownLatch(1);
+        private final CountDownLatch completed = new CountDownLatch(1);
 
         private TestService(UpstreamClient upstream, Path root) {
-            super(null, upstream, mock(PlaybackLogService.class), root.toString(), "ffmpeg");
+            super(null, upstream, mock(PlaybackLogService.class), root.toString(), "ffmpeg", new MediaRedirectCache());
         }
 
         @Override
-        Mono<Void> download(URI source, Path destination) {
+        Mono<Path> downloadAndRemux(URI source, Path input, Path directory) {
             downloads.incrementAndGet();
-            try {
-                Files.writeString(destination, "source");
-                return Mono.empty();
-            } catch (Exception error) {
-                return Mono.error(error);
-            }
-        }
-
-        @Override
-        void remux(Path input, Path directory) {
             remuxes.incrementAndGet();
-            try {
+            return Mono.delay(java.time.Duration.ofMillis(150)).then(Mono.fromCallable(() -> {
+                Files.writeString(input, "source");
                 Files.createDirectories(directory.resolve("remux"));
-                Files.writeString(directory.resolve("manifest.mpd"), "<MPD/>");
+                Files.writeString(directory.resolve("manifest.mpd"), EARLY_MANIFEST);
+                for (String filename : List.of("init-0.m4s", "init-1.m4s", "chunk-0-00001.m4s", "chunk-1-00001.m4s")) {
+                    Files.writeString(directory.resolve("remux").resolve(filename), "media");
+                }
                 Files.writeString(directory.resolve("remux/init-stream0.m4s"), "init");
-            } catch (Exception error) {
-                throw new AssertionError(error);
-            }
+                return directory;
+            })).then(Mono.fromCallable(() -> {
+                if (!finishRemux.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Test remux was not released");
+                }
+                Files.writeString(directory.resolve("manifest.mpd"), "<MPD type=\"static\"/>");
+                completed.countDown();
+                return directory;
+            })).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic());
         }
     }
 }

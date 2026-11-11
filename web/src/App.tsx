@@ -996,9 +996,13 @@ export default function App() {
       player.configure("streaming.retryParameters.timeout", 120_000);
       player.configure("streaming.retryParameters.connectionTimeout", 60_000);
       player.configure("streaming.retryParameters.stallTimeout", 30_000);
-      player.configure("manifest.retryParameters.timeout", 120_000);
+      player.configure("manifest.retryParameters.timeout", 15 * 60_000);
       player.configure("manifest.retryParameters.connectionTimeout", 60_000);
       player.configure("manifest.retryParameters.stallTimeout", 30_000);
+      if (selectedQuality === "best") {
+        player.configure("abr.enabled", false);
+        player.configure("abr.restrictions.maxHeight", 1080);
+      }
       const networking = player.getNetworkingEngine();
       if (!networking) throw new Error("Shaka networking engine недоступен");
       const mediaOrigin = new URL(MEDIA_BASE_URL || window.location.href, window.location.href).origin;
@@ -1021,26 +1025,23 @@ export default function App() {
           text: `${label}: ${elapsed} с` }].slice(-10));
       };
       setLoadTimings([]);
-      setPlaybackStatus("Запрос DASH-манифеста…");
+      setPlaybackStatus("Загрузка DASH-манифеста и инициализация Shaka…");
       const manifestStartedAt = performance.now();
-      const prepared = await fetch(manifestUrl, {
-        headers: { Authorization: `Bearer ${await ensureAccessToken()}` },
-        signal: AbortSignal.timeout(15 * 60_000),
+      networking.registerResponseFilter(type => {
+        if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) {
+          addTiming("MPD получен", manifestStartedAt);
+        }
       });
-      if (!prepared.ok) throw await responseError(prepared);
-      await prepared.arrayBuffer();
-      addTiming("MPD получен", manifestStartedAt);
+      const playerStartedAt = performance.now();
+      await player.load(manifestUrl);
+      const initialTrack = player.getVariantTracks().find(track => track.active);
+      addTiming(`Shaka инициализирован, старт ${initialTrack?.height || "?"}p`, playerStartedAt);
       if (disposed) {
         await player.destroy();
         return;
       }
-      setPlaybackStatus("Инициализация Shaka…");
-      const playerStartedAt = performance.now();
-      await player.load(manifestUrl);
-      addTiming("Shaka инициализирован", playerStartedAt);
-      if (disposed) {
-        await player.destroy();
-        return;
+      if (selectedQuality === "best") {
+        player.configure("abr.restrictions.maxHeight", Number.POSITIVE_INFINITY);
       }
       await progressRequestRef.current;
       const resume = watchProgressRef.current[watchId];
