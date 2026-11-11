@@ -17,8 +17,14 @@ export function UserMenu({ username, role, avatarUrl, settings, onChange, onNavi
         <img className="avatar user-avatar-large" src={avatarUrl} alt="" />
         <div><strong>{username}</strong><div className="muted">{role}</div></div>
       </div>
-      <button className="link" data-nav-url="/user-playlists" onClick={() => onNavigate("/user-playlists")}>Плейлисты</button>
-      <button className="link" data-nav-url="/library" onClick={() => onNavigate("/library")}>Библиотека</button>
+      <a className="link" href="/user-playlists" onClick={event => {
+        event.preventDefault();
+        onNavigate("/user-playlists");
+      }}>Плейлисты</a>
+      <a className="link" href="/library" onClick={event => {
+        event.preventDefault();
+        onNavigate("/library");
+      }}>Библиотека</a>
       <button className="link" onClick={() => onNavigate("/settings")}>Настройки</button>
       {role === "ADMIN" && <button className="link" data-nav-url="/admin" onClick={() => onNavigate("/admin")}>Квоты</button>}
       <label className="switch-row"><span>Тема</span>

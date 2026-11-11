@@ -87,6 +87,10 @@ paths:
         - name: cursor
           in: query
           schema: { type: string }
+        - name: includePlaylists
+          in: query
+          schema: { type: boolean, default: false }
+          description: Load the first playlists page only for the playlists tab; videos and streams do not fetch it
       responses:
         '200':
           description: Channel metadata and avatar

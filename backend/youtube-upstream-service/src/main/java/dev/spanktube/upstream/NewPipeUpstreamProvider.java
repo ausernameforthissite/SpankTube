@@ -50,8 +50,11 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
     private final LiveDashClient liveDashClient;
 
     NewPipeUpstreamProvider(@Qualifier("youtubeHttpClient") HttpClient httpClient,
-            NewPipePageCodec pages, ObjectProvider<EgressProbe> egressProbe, LiveDashClient liveDashClient) {
+            NewPipePageCodec pages, ObjectProvider<EgressProbe> egressProbe, LiveDashClient liveDashClient,
+            BgutilPoTokenProvider poTokenProvider) {
         NewPipe.init(new ReactorNettyDownloader(httpClient));
+        org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExtractor
+                .setPoTokenProvider(poTokenProvider);
         this.pages = pages;
         this.egressProbe = egressProbe.getIfAvailable();
         this.liveDashClient = liveDashClient;

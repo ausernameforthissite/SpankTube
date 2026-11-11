@@ -7,6 +7,7 @@ import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
 import { LibraryView } from "./LibraryView";
+import { LazyThumbnail } from "./LazyThumbnail";
 import { Pagination } from "./Pagination";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackLog } from "./PlaybackLog";
@@ -93,14 +94,54 @@ class RequestError extends Error {
 }
 
 function loadSession(): Session | null {
-  const stored = sessionStorage.getItem(STORAGE_KEY);
+  const stored = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
   if (!stored) return null;
   try {
-    return JSON.parse(stored) as Session;
+    const session = JSON.parse(stored) as Session;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    sessionStorage.removeItem(STORAGE_KEY);
+    return session;
   } catch {
+    localStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
     return null;
   }
+}
+
+const REFRESH_LOCK_KEY = "spanktube.refresh.lock";
+
+function readRefreshLock(): { owner: string; expiresAt: number } | null {
+  try {
+    const stored = localStorage.getItem(REFRESH_LOCK_KEY);
+    return stored ? JSON.parse(stored) as { owner: string; expiresAt: number } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function withRefreshLock(action: () => Promise<string>): Promise<string> {
+  if (navigator.locks?.request) return navigator.locks.request("spanktube.refresh", action);
+  const owner = newEstimateId();
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const now = Date.now();
+    const lock = readRefreshLock();
+    if (!lock || lock.expiresAt <= now) {
+      localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ owner, expiresAt: now + 15_000 }));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (readRefreshLock()?.owner === owner) {
+        try {
+          return await action();
+        } finally {
+          if (readRefreshLock()?.owner === owner) localStorage.removeItem(REFRESH_LOCK_KEY);
+        }
+      }
+    }
+    const latest = loadSession();
+    if (latest && Date.now() < latest.accessExpiresAt - 30_000) return latest.accessToken;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return action();
 }
 
 async function responseError(response: Response): Promise<RequestError> {
@@ -308,6 +349,7 @@ export default function App() {
   const playbackSession = useMemo(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     [watchId, requestedStart]);
   const [playbackStatus, setPlaybackStatus] = useState("Плеер не запущен");
+  const [loadTimings, setLoadTimings] = useState<{ id: number; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<string[]>([]);
@@ -333,33 +375,60 @@ export default function App() {
   const saveSession = useCallback((next: Session | null) => {
     sessionRef.current = next;
     setSession(next);
-    if (next) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    else sessionStorage.removeItem(STORAGE_KEY);
+    if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    else localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
   const acceptTokens = useCallback((tokens: TokenPair, name: string) => {
     saveSession({ ...tokens, username: name, accessExpiresAt: Date.now() + tokens.expiresIn * 1000 });
   }, [saveSession]);
 
+  useEffect(() => {
+    const syncSession = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY) return;
+      if (!event.newValue) {
+        sessionRef.current = null;
+        setSession(null);
+        return;
+      }
+      try {
+        const next = JSON.parse(event.newValue) as Session;
+        sessionRef.current = next;
+        setSession(next);
+      } catch {
+      }
+    };
+    window.addEventListener("storage", syncSession);
+    return () => window.removeEventListener("storage", syncSession);
+  }, []);
+
   const ensureAccessToken = useCallback(async (): Promise<string> => {
     const current = sessionRef.current;
     if (!current) throw new RequestError("Сначала войдите в аккаунт");
     if (Date.now() < current.accessExpiresAt - 30_000) return current.accessToken;
     if (refreshRef.current) return refreshRef.current;
-    refreshRef.current = (async () => {
+    refreshRef.current = withRefreshLock(async () => {
+      const latest = loadSession() ?? sessionRef.current;
+      if (latest && Date.now() < latest.accessExpiresAt - 30_000) {
+        sessionRef.current = latest;
+        setSession(latest);
+        return latest.accessToken;
+      }
+      if (!latest) throw new RequestError("Сначала войдите в аккаунт");
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: current.refreshToken }),
+        body: JSON.stringify({ refreshToken: latest.refreshToken }),
       });
       if (!response.ok) {
         saveSession(null);
         throw await responseError(response);
       }
       const tokens = (await response.json()) as TokenPair;
-      acceptTokens(tokens, current.username);
+      acceptTokens(tokens, latest.username);
       return tokens.accessToken;
-    })();
+    });
     try {
       return await refreshRef.current;
     } finally {
@@ -449,7 +518,8 @@ export default function App() {
   const playbackLogs = usePlaybackLogs(watchId, playbackSession,
     Boolean(session) && !controlsReady, apiFetch);
   const metadataLogs = usePlaybackLogs(null, metadataSession,
-    Boolean(session) && !archiveFile && metadataSupported, apiFetch, "metadata");
+    Boolean(session) && loading && !archiveFile && metadataSupported, apiFetch, "metadata");
+  const journalLines = [...playbackLogs, ...loadTimings];
 
   const notify = useCallback((message: string) => {
     document.getElementById("spanktube-toast")?.remove();
@@ -816,6 +886,7 @@ export default function App() {
         const cursor = currentPage === 1 ? null : query.get("cursor");
         const params = new URLSearchParams({ logSession: metadataSession });
         if (cursor && channelTab === "videos") params.set("cursor", cursor);
+        if (channelTab === "playlists") params.set("includePlaylists", "true");
         const response = await apiFetch(`/api/v1/channels/${encodeURIComponent(id)}?${params.toString()}`);
         const data = await response.json() as ChannelPage;
         if (channelTab === "streams") {
@@ -901,13 +972,11 @@ export default function App() {
     playerRef.current = null;
   }, [watchId]);
 
-  const videoFormatsReady = video !== null;
-  const progressiveRemux = Boolean(!playbackVersion && video?.formats.length === 1
-    && video.formats[0].hasVideo && video.formats[0].hasAudio && video.formats[0].mimeType?.includes("mp4"));
+  const manifestPath = video?.manifestUrl?.startsWith("/media/")
+    ? video.manifestUrl : `/media/v/${watchId}/manifest.mpd`;
 
   useEffect(() => {
     if (!watchId || !videoElement || !archiveChecked || !settingsLoaded) return;
-    if (!playbackVersion && !videoFormatsReady) return;
     let disposed = false;
     let player: shaka.Player | null = null;
     setPlayerReady(false);
@@ -944,23 +1013,31 @@ export default function App() {
       player.addEventListener("error", event => showError((event as CustomEvent<unknown>).detail));
       const manifestParams = new URLSearchParams({ playbackSession });
       if (playbackVersion) manifestParams.set("version", playbackVersion);
-      const manifestPath = video?.manifestUrl?.startsWith("/media/")
-        ? video.manifestUrl : `/media/v/${watchId}/manifest.mpd`;
       const manifestUrl = `${MEDIA_BASE_URL}${manifestPath}?${manifestParams}`;
-      if (progressiveRemux) {
-        setPlaybackStatus("Подготовка DASH из прогрессивного MP4…");
-        const prepared = await fetch(manifestUrl, {
-          headers: { Authorization: `Bearer ${await ensureAccessToken()}` },
-          signal: AbortSignal.timeout(15 * 60_000),
-        });
-        if (!prepared.ok) throw await responseError(prepared);
-        await prepared.arrayBuffer();
-      }
+      const startedAt = performance.now();
+      const addTiming = (label: string, since: number) => {
+        const elapsed = ((performance.now() - since) / 1000).toFixed(3);
+        setLoadTimings(current => [...current, { id: Date.now() + current.length,
+          text: `${label}: ${elapsed} с` }].slice(-10));
+      };
+      setLoadTimings([]);
+      setPlaybackStatus("Запрос DASH-манифеста…");
+      const manifestStartedAt = performance.now();
+      const prepared = await fetch(manifestUrl, {
+        headers: { Authorization: `Bearer ${await ensureAccessToken()}` },
+        signal: AbortSignal.timeout(15 * 60_000),
+      });
+      if (!prepared.ok) throw await responseError(prepared);
+      await prepared.arrayBuffer();
+      addTiming("MPD получен", manifestStartedAt);
       if (disposed) {
         await player.destroy();
         return;
       }
+      setPlaybackStatus("Инициализация Shaka…");
+      const playerStartedAt = performance.now();
       await player.load(manifestUrl);
+      addTiming("Shaka инициализирован", playerStartedAt);
       if (disposed) {
         await player.destroy();
         return;
@@ -976,10 +1053,7 @@ export default function App() {
       const tracks = player.getVariantTracks().filter(track => (track.height || 0) > 0)
         .sort((left, right) => (right.height || 0) - (left.height || 0) || right.bandwidth - left.bandwidth);
       setQualityTracks(tracks);
-      if (selectedQuality === "best" && tracks.length > 0) {
-        const original = tracks.find(track => track.audioRoles?.includes("main")) || tracks[0];
-        player.selectVariantTrack(original, true);
-      } else if (typeof selectedQuality === "number") {
+      if (typeof selectedQuality === "number") {
         const selected = tracks.find(track => track.id === selectedQuality);
         if (selected) player.selectVariantTrack(selected, true);
       }
@@ -997,8 +1071,15 @@ export default function App() {
           }
         }
       }
+      if (selectedQuality === "best" && tracks.length > 0) {
+        const original = tracks.find(track => track.audioRoles?.includes("main")) || tracks[0];
+        player.selectVariantTrack(original, false);
+      }
+      addTiming("Общая подготовка", startedAt);
     };
-    start().catch(showError);
+    start().catch(reason => {
+      if (!disposed) showError(reason);
+    });
     return () => {
       disposed = true;
       setPlayerReady(false);
@@ -1006,7 +1087,7 @@ export default function App() {
       playerRef.current = null;
     };
   }, [watchId, videoElement, ensureAccessToken, showError, playbackSession, archiveChecked, playbackVersion,
-    requestedStart, settingsLoaded, videoFormatsReady, progressiveRemux]);
+    requestedStart, settingsLoaded, manifestPath]);
 
   useEffect(() => {
     if (!video || !videoElement || !video.sponsorBlock?.length) return;
@@ -1685,7 +1766,7 @@ export default function App() {
                 onToggleTheater={() => setTheater(current => !current)} onInteraction={keepControlsVisible}
                 onError={showError} />}
               {!controlsReady && <PlaybackLog lines={loading && !archiveFile && metadataLogs.length > 0
-                ? metadataLogs : playbackLogs} />}
+                ? metadataLogs : journalLines} />}
             </div>
             <div className="playback">
               {video && (activeLive ? <>
@@ -1719,10 +1800,10 @@ export default function App() {
                     onClick={event => togglePopup("download", event.currentTarget)}>▼</button>
                 </div>
               </>)}
-              {playbackLogs.length > 0 && <button type="button" className="playback-log-latest"
-                aria-label="Открыть журнал подготовки видео" title={playbackLogs[playbackLogs.length - 1].text}
+              {journalLines.length > 0 && <button type="button" className="playback-log-latest"
+                aria-label="Открыть журнал подготовки видео" title={journalLines[journalLines.length - 1].text}
                 onClick={event => togglePopup("playbackLog", event.currentTarget)}>
-                {playbackLogs[playbackLogs.length - 1].text}
+                {journalLines[journalLines.length - 1].text}
               </button>}
               <span className="playback-status">{playbackStatus}</span>
             </div>
@@ -1879,7 +1960,7 @@ export default function App() {
         {popup === "history" && <HistoryMenu versions={historyVersions} onSelect={selectHistory} onClose={() => setPopup(null)} />}
         {popup === "playbackLog" && <section className="playback-log-options" aria-label="Журнал подготовки видео">
           <div className="popup-header"><button className="popup-close" aria-label="Закрыть журнал" onClick={() => setPopup(null)}>×</button></div>
-          <PlaybackLog lines={playbackLogs} overlay={false} />
+          <PlaybackLog lines={journalLines} overlay={false} />
         </section>}
       </div>
     </main>
@@ -1909,14 +1990,15 @@ function ResultGrid({ items, navigate, progressMap, archiveLocations, onArchiveO
 }) {
   return (
     <div className="result-grid">
-      {items.map(item => {
+      {items.map((item, index) => {
         const url = withPlaylistOrigin(item);
         const metadata = [item.viewCount != null ? `${formatViews(item.viewCount)} просмотров` : null,
           item.publishedAt ? relativeDate(item.publishedAt) : null].filter(Boolean).join(" · ");
         return <article className="result-card" key={`${item.kind}:${item.id}`} data-nav-url={url}>
           <div className="result-thumbnail">
             <a className="result-thumbnail-link" href={url} onClick={event => { event.preventDefault(); navigate(url); }}>
-              {item.thumbnailUrl && <img src={item.thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
+              {item.thumbnailUrl && <LazyThumbnail src={item.thumbnailUrl} alt="" priority={index < 4}
+                onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
               {broadcastBadges && (item.streamType === "LIVE_STREAM" || item.streamType === "AUDIO_LIVE_STREAM"
                 ? <span className="broadcast-badge live" title="Идёт прямой эфир"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4M2.7 2.7a13 13 0 0 0 0 18.6M21.3 2.7a13 13 0 0 1 0 18.6" /></svg>В эфире</span>
                 : item.streamType === "POST_LIVE_STREAM" || item.streamType === "POST_LIVE_AUDIO_STREAM"

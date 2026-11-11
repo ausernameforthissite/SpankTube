@@ -93,6 +93,10 @@ services:
     ports:
       - "127.0.0.1:8083:8083"
 
+  bgutil-pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
+    restart: unless-stopped
+
   youtube-upstream-service:
     build:
       context: ..
@@ -103,10 +107,14 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      bgutil-pot-provider:
+        condition: service_started
     environment:
       <<: *egress-environment
       JAVA_TOOL_OPTIONS: -Xmx320m
       REDIS_HOST: redis
+      BGUTIL_POT_PROVIDER_URL: http://bgutil-pot-provider:4416
+      YT_DLP_EXTRA_ARGS: "--extractor-args,youtubepot-bgutilhttp:base_url=http://bgutil-pot-provider:4416"
     ports:
       - "127.0.0.1:8081:8081"
 

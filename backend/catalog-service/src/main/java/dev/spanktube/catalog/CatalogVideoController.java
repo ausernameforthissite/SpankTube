@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @RestController
 class CatalogVideoController {
@@ -21,13 +23,21 @@ class CatalogVideoController {
     }
 
     @GetMapping("/api/v1/videos/{videoId}")
-    Map<String, Object> video(@PathVariable String videoId, @RequestParam(required = false) String logSession) {
-        Map<String, Object> response = upstreamClient.video(videoId, logSession);
-        response.put("sponsorBlock", sponsorBlockClient.segments(videoId));
-        Long dislikes = rydClient.dislikes(videoId);
-        if (dislikes != null) {
-            response.put("dislikeCountEstimate", dislikes);
-        }
-        return response;
+    Mono<Map<String, Object>> video(@PathVariable String videoId, @RequestParam(required = false) String logSession) {
+        Mono<Map<String, Object>> video = Mono.fromCallable(() -> upstreamClient.video(videoId, logSession))
+                .subscribeOn(Schedulers.boundedElastic());
+        Mono<java.util.List<SponsorBlockClient.Segment>> segments = Mono.fromCallable(() -> sponsorBlockClient.segments(videoId))
+                .subscribeOn(Schedulers.boundedElastic());
+        Mono<Long> dislikes = Mono.fromCallable(() -> rydClient.dislikes(videoId))
+                .subscribeOn(Schedulers.boundedElastic());
+        return Mono.zip(video, segments, dislikes)
+                .map(result -> {
+                    Map<String, Object> response = result.getT1();
+                    response.put("sponsorBlock", result.getT2());
+                    if (result.getT3() != null) {
+                        response.put("dislikeCountEstimate", result.getT3());
+                    }
+                    return response;
+                });
     }
 }

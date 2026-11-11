@@ -33,6 +33,10 @@ spec:
               value: /tmp
             - name: XDG_CACHE_HOME
               value: /tmp/.cache
+            - name: BGUTIL_POT_PROVIDER_URL
+              value: http://127.0.0.1:4416
+            - name: YT_DLP_EXTRA_ARGS
+              value: "--extractor-args,youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -58,6 +62,27 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+        - name: bgutil-pot-provider
+          image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4416
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 4416
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
       volumes:
         - name: tmp
           emptyDir: {}

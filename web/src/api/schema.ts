@@ -1486,6 +1486,8 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Load the first playlists page only for the playlists tab; videos and streams do not fetch it */
+                includePlaylists?: boolean;
             };
             header?: never;
             path: {

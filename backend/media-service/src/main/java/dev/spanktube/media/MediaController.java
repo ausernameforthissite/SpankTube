@@ -18,14 +18,17 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.netty.http.client.HttpClient;
 
 @RestController
 class MediaController {
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(MediaController.class);
     private static final MediaType DASH = MediaType.parseMediaType("application/dash+xml");
     private static final MediaType HLS = MediaType.parseMediaType("application/vnd.apple.mpegurl");
     private static final MediaType VTT = MediaType.parseMediaType("text/vtt");
@@ -46,16 +49,20 @@ class MediaController {
     private final ProgressiveDashService progressiveDash;
     private final LiveDashService liveDash;
     private final LiveHlsService liveHls;
+    private final MediaRedirectCache redirectCache = new MediaRedirectCache();
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
-            DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
+            DashManifestGenerator manifestGenerator, @Qualifier("youtubeHttpClient") HttpClient youtubeHttpClient,
             ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
             ThumbnailService thumbnailService, PlaybackLogService playbackLogs, ProgressiveDashService progressiveDash,
             LiveDashService liveDash, LiveHlsService liveHls) {
         this.upstreamClient = upstreamClient;
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
-        this.youtubeClient = youtubeClient;
+        this.youtubeClient = WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(
+                        youtubeHttpClient.doOnResponse((response, connection) -> redirectCache.record(response))))
+                .build();
         this.egressProbe = egressProbe.getIfAvailable();
         this.archivePlayback = archivePlayback;
         this.thumbnailService = thumbnailService;
@@ -73,7 +80,8 @@ class MediaController {
 
     @GetMapping("/media/v/{videoId}/manifest.mpd")
     Mono<ResponseEntity<String>> manifest(@PathVariable String videoId, @RequestHeader HttpHeaders headers,
-            @RequestParam(required = false) String playbackSession, @RequestParam(required = false) String version) {
+            @RequestParam(required = false) String playbackSession, @RequestParam(required = false) String version,
+            @RequestParam(defaultValue = "false") boolean full) {
         playbackLogs.log(videoId, playbackSession, "Проверка архивной копии SpankTube…");
         return archivePlayback.manifest(videoId, headers.getFirst("X-SpankTube-User"), playbackSession, version)
                 .switchIfEmpty(Mono.defer(() -> {
@@ -85,7 +93,7 @@ class MediaController {
                                 Mono<String> body = video.isLive() ? liveDash.manifest(video)
                                         : ProgressiveDashService.requiresRemux(video)
                                         ? progressiveDash.manifest(video, playbackSession)
-                                        : mp4IndexService.enrich(video, playbackSession).map(manifestGenerator::generate);
+                                        : mp4IndexService.enrich(video, playbackSession, full).map(manifestGenerator::generate);
                                 return body.map(content -> ResponseEntity.ok()
                                         .contentType(DASH)
                                         .cacheControl(CacheControl.noCache())
@@ -213,11 +221,24 @@ class MediaController {
             return Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "YouTube egress is unavailable: " + egressProbe.lastError()));
         }
+        long started = System.nanoTime();
+        URI target = redirectCache.resolve(uri);
         return youtubeClient.get()
-                .uri(uri)
+                .uri(target)
                 .headers(outgoing -> copyHeaders(incoming, outgoing, REQUEST_HEADERS))
                 .retrieve()
                 .toEntityFlux(DataBuffer.class)
+                .doOnNext(response -> {
+                    if (!response.getStatusCode().is2xxSuccessful()) {
+                        redirectCache.invalidate(target);
+                    }
+                    LOGGER.debug("YouTube proxy host={} range={} status={} connection={} elapsedMs={}",
+                            uri.getHost(), incoming.getFirst(HttpHeaders.RANGE), response.getStatusCode().value(),
+                            response.getHeaders().getFirst(HttpHeaders.CONNECTION), (System.nanoTime() - started) / 1_000_000);
+                })
+                .doOnError(error -> LOGGER.debug("YouTube proxy host={} range={} error={} elapsedMs={}",
+                        uri.getHost(), incoming.getFirst(HttpHeaders.RANGE), error.getClass().getSimpleName(),
+                        (System.nanoTime() - started) / 1_000_000))
                 .retryWhen(MediaRetry.transientFailures())
                 .map(response -> {
                     HttpHeaders outgoing = new HttpHeaders();

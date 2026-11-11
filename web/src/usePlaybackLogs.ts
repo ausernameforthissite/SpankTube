@@ -1,22 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApiFetch } from "./types";
+import { useDocumentVisible } from "./useDocumentVisible";
 
 export type PlaybackLogLine = { id: number; text: string };
 
 export function usePlaybackLogs(videoId: string | null, sessionId: string, active: boolean,
   apiFetch: ApiFetch, kind: "playback" | "metadata" = "playback"): PlaybackLogLine[] {
   const [lines, setLines] = useState<PlaybackLogLine[]>([]);
+  const nextId = useRef(0);
+  const visible = useDocumentVisible();
 
   useEffect(() => {
     setLines([]);
+    nextId.current = 0;
   }, [videoId, sessionId, kind]);
 
   useEffect(() => {
-    if (!active || (kind === "playback" && !videoId)) return;
+    if (!visible || !active || (kind === "playback" && !videoId)) return;
     let stopped = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let abort: AbortController | null = null;
-    let nextId = 0;
 
     const listen = async () => {
       try {
@@ -40,7 +43,7 @@ export function usePlaybackLogs(videoId: string | null, sessionId: string, activ
             const text = block.split(/\r?\n/).filter(line => line.startsWith("data:"))
               .map(line => line.slice(5).trimStart()).join("\n");
             if (!text || stopped) continue;
-            const id = ++nextId;
+            const id = ++nextId.current;
             setLines(current => [...current, { id, text }].slice(-10));
           }
         }
@@ -56,7 +59,7 @@ export function usePlaybackLogs(videoId: string | null, sessionId: string, activ
       if (retry) clearTimeout(retry);
       abort?.abort();
     };
-  }, [videoId, sessionId, active, apiFetch, kind]);
+  }, [videoId, sessionId, active, visible, apiFetch, kind]);
 
   return lines;
 }

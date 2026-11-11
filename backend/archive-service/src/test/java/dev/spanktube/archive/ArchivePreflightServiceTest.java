@@ -182,6 +182,67 @@ class ArchivePreflightServiceTest {
         }
     }
 
+    @Test
+    void collectsChannelPlaylistPagesInParallel() throws Exception {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.channelVideos("channel", null)).thenReturn(new UpstreamClient.PageItems(List.of(), null));
+        when(upstream.channelLiveStreams("channel", null)).thenReturn(new UpstreamClient.PageItems(List.of(), null));
+        when(upstream.channelPlaylists("channel", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("p1", "p2"), null));
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        when(upstream.playlistVideos("p1", null)).thenAnswer(invocation -> {
+            started.countDown();
+            release.await(2, TimeUnit.SECONDS);
+            return new UpstreamClient.PageItems(List.of("v1"), null);
+        });
+        when(upstream.playlistVideos("p2", null)).thenAnswer(invocation -> {
+            started.countDown();
+            release.await(2, TimeUnit.SECONDS);
+            return new UpstreamClient.PageItems(List.of("v2"), null);
+        });
+        when(upstream.video(anyString())).thenAnswer(invocation -> download(invocation.getArgument(0)));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        CompletableFuture<ArchivePreflightService.Estimate> result = new CompletableFuture<>();
+        try {
+            service.estimate(ArchiveModels.Kind.CHANNEL, "channel", "viewer")
+                    .subscribe(result::complete, result::completeExceptionally);
+            assertThat(started.await(2, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+
+            ArchivePreflightService.Estimate estimate = result.get(2, TimeUnit.SECONDS);
+            assertThat(estimate.videoIds()).containsExactly("v1", "v2");
+        } finally {
+            release.countDown();
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void preservesDownstreamErrorFromParallelCollection() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        org.springframework.web.client.HttpClientErrorException failure =
+                org.springframework.web.client.HttpClientErrorException.create(
+                        org.springframework.http.HttpStatus.BAD_REQUEST, "Bad Request",
+                        org.springframework.http.HttpHeaders.EMPTY,
+                        "{\"code\":\"INVALID_ARGUMENT\",\"message\":\"Invalid cursor\"}"
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.channelVideos("channel", null)).thenThrow(failure);
+        when(upstream.channelLiveStreams("channel", null)).thenReturn(new UpstreamClient.PageItems(List.of(), null));
+        when(upstream.channelPlaylists("channel", null)).thenReturn(new UpstreamClient.PageItems(List.of(), null));
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            assertThatThrownBy(() -> service.estimate(ArchiveModels.Kind.CHANNEL, "channel", "viewer").block())
+                    .isSameAs(failure);
+        } finally {
+            service.shutdown();
+        }
+    }
+
     private static ArchivePreflightService service(UpstreamClient upstream, CatalogClient catalog,
             ArchiveSpeedService speed) {
         return new ArchivePreflightService(upstream, catalog, speed, new ArchivePreflightEvents(new ObjectMapper()));

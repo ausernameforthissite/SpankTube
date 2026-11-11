@@ -28,6 +28,8 @@ spanktube:
       enabled: true
       interval: 30s
       timeout: 10s
+  pot-provider:
+    url: ${BGUTIL_POT_PROVIDER_URL:http://localhost:4416}
   yt-dlp:
     executable: ${YT_DLP_EXECUTABLE:yt-dlp}
     timeout: 60s

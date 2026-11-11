@@ -144,7 +144,10 @@ class ArchivePreflightService {
             videos = tasks.stream().map(CompletableFuture::join).toList();
         } catch (CompletionException error) {
             current.checkCancelled();
-            throw new ArchiveDownloadException("Unable to estimate archive size: " + error.getMessage(), error);
+            if (error.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            throw error;
         }
         current.checkCancelled();
         long videoBytes = videos.stream().filter(video -> !video.existing()).mapToLong(VideoEstimate::videoBytes).sum();
@@ -196,16 +199,31 @@ class ArchivePreflightService {
                 executor);
         List<VideoPage> result = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
-        merge(result, videos.join().pages(), ids);
-        merge(result, streams.join().pages(), ids);
-        for (String playlistId : playlists.join().ids()) {
+        merge(result, join(videos, current).pages(), ids);
+        merge(result, join(streams, current).pages(), ids);
+        List<CompletableFuture<List<VideoPage>>> playlistPages = join(playlists, current).ids().stream()
+                .map(playlistId -> CompletableFuture.supplyAsync(
+                        () -> collectPages(cursor -> upstreamClient.playlistVideos(playlistId, cursor), publishedAts,
+                                current, true).pages(), executor))
+                .toList();
+        for (CompletableFuture<List<VideoPage>> pages : playlistPages) {
+            merge(result, join(pages, current), ids);
+        }
+        return List.copyOf(result);
+    }
+
+    private static <T> T join(CompletableFuture<T> future, Progress current) {
+        try {
+            return future.join();
+        } catch (CompletionException error) {
             if (current != null) {
                 current.checkCancelled();
             }
-            merge(result, collectPages(cursor -> upstreamClient.playlistVideos(playlistId, cursor), publishedAts,
-                    current, true).pages(), ids);
+            if (error.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            throw error;
         }
-        return List.copyOf(result);
     }
 
     List<String> allPages(Function<String, UpstreamClient.PageItems> page) {

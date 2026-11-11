@@ -22,10 +22,21 @@ import reactor.netty.transport.ProxyProvider;
 @EnableConfigurationProperties(EgressProperties.class)
 public class EgressAutoConfiguration {
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(EgressAutoConfiguration.class);
+
     @Bean(name = "youtubeHttpClient")
     @ConditionalOnMissingBean(name = "youtubeHttpClient")
     HttpClient youtubeHttpClient(EgressProperties properties) {
-        HttpClient client = HttpClient.create().followRedirect(EgressAutoConfiguration::allowedRedirect);
+        HttpClient client = HttpClient.create().metrics(true, uri -> "/")
+                .doOnRequest((request, connection) -> LOGGER.debug("Egress request host={} connectionHeader={} id={}",
+                        URI.create(request.resourceUrl()).getHost(), request.requestHeaders().get(HttpHeaderNames.CONNECTION),
+                        connection.channel().id()))
+                .doAfterResponseSuccess((response, connection) -> LOGGER.debug(
+                        "Egress response status={} connectionHeader={} persistent={} open={} disposed={} id={}",
+                        response.status().code(), response.responseHeaders().get(HttpHeaderNames.CONNECTION),
+                        connection.isPersistent(), connection.channel().isOpen(), connection.isDisposed(),
+                        connection.channel().id()))
+                .followRedirect(EgressAutoConfiguration::allowedRedirect);
         if (properties.mode() == EgressProperties.Mode.DIRECT) {
             return client;
         }
@@ -74,6 +85,11 @@ public class EgressAutoConfiguration {
             String host = target.getHost() == null ? "" : target.getHost().toLowerCase(Locale.ROOT);
             boolean youtube = host.equals("youtube.com") || host.endsWith(".youtube.com");
             boolean googleVideo = host.equals("googlevideo.com") || host.endsWith(".googlevideo.com");
+            String parameters = target.getQuery() == null ? "" : java.util.Arrays.stream(target.getQuery().split("&"))
+                    .map(part -> part.split("=", 2)[0]).collect(java.util.stream.Collectors.joining(","));
+            LOGGER.debug("Egress redirect fromHost={} toHost={} status={} connection={} targetParameters={}",
+                    URI.create(request.resourceUrl()).getHost(), host, response.status().code(),
+                    response.responseHeaders().get(HttpHeaderNames.CONNECTION), parameters);
             return "https".equals(target.getScheme()) && (youtube || googleVideo);
         } catch (IllegalArgumentException error) {
             return false;

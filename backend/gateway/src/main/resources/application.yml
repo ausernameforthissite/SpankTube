@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: gateway
+  cloud:
+    gateway:
+      httpclient:
+        response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:900s}
 
 management:
   endpoints:

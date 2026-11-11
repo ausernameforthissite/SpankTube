@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CardContextMenu } from "./PlaylistMenus";
+import { LazyThumbnail } from "./LazyThumbnail";
 import type { ApiFetch, LibraryItem, LibraryPlaylist, LibraryResponse, WatchProgressMap } from "./types";
 
 function formatDuration(seconds: number): string {
@@ -77,9 +78,9 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
   const visibleItems = videoId ? items.filter(item => item.videoId === videoId) : items;
 
   const renderVideos = (videos: LibraryItem[]) => <div className="library-list">
-    {videos.map(item => <div className="library-row" key={item.videoId}>
+    {videos.map((item, index) => <div className="library-row" key={item.videoId}>
       <div className="library-thumbnail-frame">
-        <img className="library-thumbnail" src={item.thumbnailUrl} alt="" loading="lazy" />
+        <LazyThumbnail className="library-thumbnail" src={item.thumbnailUrl} alt="" priority={index < 4} />
         {progressMap[item.videoId] && <progress className="watch-progress" max={100}
           value={Math.max(0, Math.min(100, progressMap[item.videoId].watchPercent))}
           aria-label={`Прогресс просмотра: ${Math.round(progressMap[item.videoId].watchPercent)}%`} />}
@@ -184,8 +185,8 @@ function PlaylistArtwork({ playlist, videos }: { playlist: LibraryPlaylist; vide
   useEffect(() => setFailed(false), [playlist.playlistId, playlist.thumbnailUrl]);
 
   if (playlist.thumbnailUrl && !failed) {
-    return <img className="library-playlist-thumbnail" src={playlist.thumbnailUrl}
-      alt={`Превью плейлиста ${playlist.title}`} loading="lazy" onError={() => setFailed(true)} />;
+    return <LazyThumbnail className="library-playlist-thumbnail" src={playlist.thumbnailUrl}
+      alt={`Превью плейлиста ${playlist.title}`} onError={() => setFailed(true)} />;
   }
 
   const previews = playlist.videoIds.map(id => videos.find(video => video.videoId === id))
@@ -193,7 +194,7 @@ function PlaylistArtwork({ playlist, videos }: { playlist: LibraryPlaylist; vide
   return <div className="library-playlist-collage" aria-hidden="true">
     {Array.from({ length: 4 }, (_, index) => {
       const video = previews[index];
-      return video ? <img key={video.videoId} src={video.thumbnailUrl} alt="" loading="lazy" />
+      return video ? <LazyThumbnail key={video.videoId} src={video.thumbnailUrl} alt="" />
         : <span key={`empty-${index}`} />;
     })}
   </div>;

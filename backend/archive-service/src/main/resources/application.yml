@@ -12,6 +12,9 @@ spring:
     init:
       mode: always
       schema-locations: classpath:schema.sql
+  mvc:
+    async:
+      request-timeout: ${ARCHIVE_ASYNC_TIMEOUT_MS:900000}
 
 management:
   endpoints:

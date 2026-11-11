@@ -8,7 +8,7 @@ RUN --mount=type=cache,id=spanktube-gradle,target=/home/gradle/.gradle \
 FROM eclipse-temurin:25-jre
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp bgutil-ytdlp-pot-provider==2.0.2 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/backend/youtube-upstream-service/build/libs/*.jar /app/app.jar
