@@ -60,6 +60,16 @@ type SearchItem = {
 };
 type SearchResults = { items: SearchItem[]; nextCursor: string | null };
 type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
+
+class SubtitleDisplayer extends shaka.text.UITextDisplayer {
+  append(cues: shaka.text.Cue[]) {
+    for (const cue of cues) {
+      if (/<\/?[a-z][^>]*>/i.test(cue.payload)) shaka.text.Cue.parseCuePayload(cue);
+    }
+    super.append(cues);
+  }
+}
+
 type ChannelPage = Channel & { videos: SearchItem[]; playlists: SearchItem[] };
 type Playlist = {
   playlistId: string;
@@ -992,6 +1002,8 @@ export default function App() {
       }
       player = new shaka.Player();
       playerRef.current = player;
+      player.setVideoContainer(videoElement.parentElement);
+      player.configure("textDisplayFactory", () => new SubtitleDisplayer(videoElement, videoElement.parentElement));
       await player.attach(videoElement);
       player.configure("streaming.retryParameters.timeout", 120_000);
       player.configure("streaming.retryParameters.connectionTimeout", 60_000);
@@ -1251,16 +1263,17 @@ export default function App() {
     void apiFetch(path, { method: "DELETE" }).catch(() => {});
   }, [apiFetch]);
 
-  const saveCollection = async (path: string, kind: "PLAYLIST" | "CHANNEL", title: string, targetId: string) => {
+  const saveCollection = async (path: string, kind: "PLAYLIST" | "CHANNEL", title: string, targetId: string,
+    resumeEstimateId?: string) => {
     setError(null);
-    stopArchiveEstimate(false);
+    if (!resumeEstimateId) stopArchiveEstimate(false);
     const controller = new AbortController();
     archiveEstimateAbortRef.current = controller;
-    const estimateId = newEstimateId();
+    const estimateId = resumeEstimateId || newEstimateId();
     archiveEstimateActiveRef.current = estimateId;
     setArchiveCandidate({ path, title, kind, targetId });
     setArchiveEstimate(null);
-    setArchiveEstimateId(estimateId);
+    setArchiveEstimateId(resumeEstimateId || null);
     setArchiveEstimateProgress(null);
     setArchiveEstimateLoading(true);
     setPopup("archiveEstimate");
@@ -1270,20 +1283,23 @@ export default function App() {
       });
       if (response.status === 204) {
         if (archiveEstimateActiveRef.current === estimateId) archiveEstimateActiveRef.current = null;
+        setArchiveEstimateLoading(false);
         setPopup(null);
         setArchiveCandidate(null);
         return;
       }
-      setArchiveEstimate(await response.json() as ArchiveEstimate);
-      if (archiveEstimateActiveRef.current === estimateId) archiveEstimateActiveRef.current = null;
+      const initial = await response.json() as ArchiveEstimateProgress;
+      if (archiveEstimateActiveRef.current !== estimateId) return;
+      setArchiveEstimateProgress(initial);
+      setArchiveEstimateId(estimateId);
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setArchiveEstimateLoading(false);
       setPopup(null);
       showError(reason);
     } finally {
       if (archiveEstimateAbortRef.current === controller) {
         archiveEstimateAbortRef.current = null;
-        setArchiveEstimateLoading(false);
       }
     }
   };
@@ -1316,7 +1332,23 @@ export default function App() {
               .map(line => line.slice(5).trimStart()).join("\n");
             if (!text) continue;
             const next = JSON.parse(text) as ArchiveEstimateProgress;
-            if (!stopped) setArchiveEstimateProgress(next);
+            if (stopped) continue;
+            setArchiveEstimateProgress(next);
+            if (next.status === "COMPLETED") {
+              setArchiveEstimate({
+                estimateId: next.estimateId, kind: next.kind, targetId: next.targetId,
+                totalVideoCount: next.totalVideoCount, newVideoCount: next.newVideoCount,
+                existingVideoCount: next.existingVideoCount, videoBytes: next.videoBytes,
+                audioBytes: next.audioBytes, totalBytes: next.totalBytes,
+                estimatedSeconds: next.estimatedSeconds, videoBps: next.videoBps, audioBps: next.audioBps,
+                skippedVideoCount: next.skippedVideoCount, skippedVideos: next.skippedVideos,
+              });
+              setArchiveEstimateLoading(false);
+              if (archiveEstimateActiveRef.current === next.estimateId) archiveEstimateActiveRef.current = null;
+            } else if (next.status === "FAILED" || next.status === "CANCELLED") {
+              setArchiveEstimateLoading(false);
+              if (archiveEstimateActiveRef.current === next.estimateId) archiveEstimateActiveRef.current = null;
+            }
           }
         }
       } catch (reason) {
@@ -1372,6 +1404,12 @@ export default function App() {
     setArchiveEstimateId(null);
     setArchiveEstimateProgress(null);
     setArchiveEstimateLoading(false);
+  };
+
+  const retryArchiveEstimate = async () => {
+    if (!archiveCandidate || !archiveEstimateId) return;
+    await saveCollection(archiveCandidate.path, archiveCandidate.kind, archiveCandidate.title,
+      archiveCandidate.targetId, archiveEstimateId);
   };
 
   const confirmArchiveCollection = async () => {
@@ -1951,7 +1989,7 @@ export default function App() {
           onDownload={() => { setPopup(null); void download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true }, menuVideo.id); }} />}
         {popup === "archiveEstimate" && archiveCandidate && <ArchiveEstimateDialog title={archiveCandidate.title}
           estimate={archiveEstimate} progress={archiveEstimateProgress}
-          loading={archiveEstimateLoading} onCancel={cancelArchiveEstimate}
+          loading={archiveEstimateLoading} onCancel={cancelArchiveEstimate} onRetry={() => void retryArchiveEstimate()}
           onConfirm={() => void confirmArchiveCollection()} />}
         {popup === "playlistPicker" && <PlaylistPicker playlists={userPlaylists} query={playlistQuery}
           onQuery={setPlaylistQuery} onSelect={playlist => void addToPlaylist(playlist)}

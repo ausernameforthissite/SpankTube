@@ -35,6 +35,8 @@ button.secondary { color: #d8deea; background: #303745; }
 .video-frame.theater { width: 100vw; margin-left: calc(50% - 50vw); isolation: isolate; }
 .video-frame.theater::before { position: absolute; z-index: -1; inset: 4% 2%; background: linear-gradient(90deg, #536dff88, #a958df66, #4db9e888); filter: blur(58px); content: ""; }
 video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.video-frame .shaka-text-container { position: absolute; z-index: 2; right: 0; bottom: calc(16px + var(--player-controls-height, 0px)); left: 0; width: auto; min-width: 0; padding: 0 5%; pointer-events: none; color: #fff; font-size: clamp(1rem, 2.5vw, 2rem); line-height: 1.4; transition: bottom 0.15s ease; }
+.video-frame .shaka-text-container > div, .video-frame .shaka-text-container > .shaka-text-region { position: static !important; inset: auto !important; float: none !important; width: auto !important; height: auto !important; max-width: 100%; align-items: center !important; text-align: center !important; transform: none !important; }
 .seek-gestures { position: absolute; z-index: 1; inset: 0; cursor: pointer; touch-action: manipulation; }
 .seek-effect { position: absolute; z-index: 2; top: 0; bottom: 48px; display: flex; width: min(46%, 320px); flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .seek-effect.left { left: 0; }
@@ -168,6 +170,7 @@ code { color: #d9e3ff; }
 .archive-estimate-stats { display: grid; gap: 5px; }
 .archive-estimate-progress { display: grid; gap: 10px; }
 .archive-estimate-progress progress { width: 100%; height: 12px; accent-color: #9cb4ff; }
+.archive-estimate-skipped { max-height: 220px; overflow-y: auto; overflow-wrap: anywhere; }
 .playlist-picker-list { display: grid; max-height: 45vh; gap: 6px; overflow-y: auto; }
 .playlist-picker-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; color: #e7ecf5; background: #202838; text-align: left; }
 .playlist-picker-item strong, .playlist-picker-item .muted { display: block; }

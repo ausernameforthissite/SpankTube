@@ -1174,6 +1174,8 @@ export interface components {
             videoBps: number;
             /** Format: int64 */
             audioBps: number;
+            skippedVideoCount: number;
+            skippedVideos: components["schemas"]["SkippedVideo"][];
             videoIds: string[];
             /** Format: date-time */
             createdAt: string;
@@ -1221,6 +1223,13 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            skippedVideoCount: number;
+            skippedVideos: components["schemas"]["SkippedVideo"][];
+        };
+        SkippedVideo: {
+            videoId: string;
+            /** @description Original upstream error */
+            reason: string;
         };
         ChannelArchiveStatus: {
             /** Format: date-time */
@@ -2144,21 +2153,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Estimated bytes and download time before the user confirms a batch archive */
-            200: {
+            /** @description Estimation started and returns immediately. Completion and final totals arrive through the SSE stream and status endpoint. */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArchiveEstimate"];
+                    "application/json": components["schemas"]["ArchiveEstimateProgress"];
                 };
-            };
-            /** @description Estimation was cancelled before a result became available */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

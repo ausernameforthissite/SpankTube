@@ -75,6 +75,21 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
   const [selectedAudio, setSelectedAudio] = useState<number | "">("");
   const [fullscreen, setFullscreen] = useState(false);
   const audibleVolume = useRef(video.volume || 1);
+  const controlsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const frame = controls?.closest<HTMLElement>(".video-frame");
+    if (!controls || !frame) return;
+    const updateHeight = () => frame.style.setProperty("--player-controls-height", `${controls.getBoundingClientRect().height}px`);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(controls);
+    return () => {
+      observer.disconnect();
+      frame.style.removeProperty("--player-controls-height");
+    };
+  }, []);
 
   useEffect(() => {
     const sync = () => {
@@ -212,7 +227,7 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
   const bufferedPercentage = duration > 0 ? Math.min(buffered, duration) / duration * 100 : 0;
 
   return (
-    <div className="player-controls" onClick={event => event.stopPropagation()}
+    <div ref={controlsRef} className="player-controls" onClick={event => event.stopPropagation()}
       onClickCapture={onInteraction}
       onPointerDown={event => { event.stopPropagation(); onInteraction(); }}
       onPointerUp={event => event.stopPropagation()}

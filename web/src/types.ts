@@ -64,6 +64,8 @@ export type QueueJob = {
 
 export type QueueSnapshot = { jobs: QueueJob[]; beforeYou: number };
 
+export type ArchiveSkippedVideo = { videoId: string; reason: string };
+
 export type ArchiveEstimate = {
   estimateId: string;
   kind: "PLAYLIST" | "CHANNEL";
@@ -77,6 +79,8 @@ export type ArchiveEstimate = {
   estimatedSeconds: number;
   videoBps: number;
   audioBps: number;
+  skippedVideoCount: number;
+  skippedVideos: ArchiveSkippedVideo[];
 };
 
 export type ArchiveEstimateProgress = {
@@ -103,6 +107,8 @@ export type ArchiveEstimateProgress = {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  skippedVideoCount: number;
+  skippedVideos: ArchiveSkippedVideo[];
 };
 
 export type ChannelArchiveStatus = {

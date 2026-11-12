@@ -16,8 +16,8 @@
 | `design/00-overview.md` | Цели, риски, стек, архитектура и сервисы, этапы, принятые решения, ресурсы | 1–5, 17–19 |
 | `design/01-upstream-and-metadata.md` | UpstreamProvider, NewPipe, yt-dlp, Kids, continuation, ошибки, Redis-кэш, PO-токены, RYD/SponsorBlock | 6, 35, 38, 41, 46, 64, 68, 72, 78 |
 | `design/02-media-and-playback.md` | DASH/HLS, media-service, Shaka, progressive MP4, архивный DASH, эфир, redirect-кэш и запуск | 8, 20, 24, 33, 34, 40, 47, 48, 52, 54, 67, 70, 71, 73, 75, 76 |
-| `design/03-archive-and-library.md` | Архивация, очередь, NFS, версии, библиотека, плейлисты, дорожки, preflight и запись эфира | 9, 21–23, 25, 27, 28, 43–45, 50, 51, 56, 61–63 |
-| `design/04-web-and-clients.md` | Web UI/UX, popup, навигация, возобновление, таймкоды, настройки, описания, сессии, превью, SSE | 15, 29–32, 36, 37, 39, 53, 55, 57, 58, 65, 66, 69, 74 |
+| `design/03-archive-and-library.md` | Архивация, очередь, NFS, версии, библиотека, плейлисты, дорожки, preflight и запись эфира | 9, 21–23, 25, 27, 28, 43–45, 50, 51, 56, 61–63, 80–84 |
+| `design/04-web-and-clients.md` | Web UI/UX, popup, навигация, возобновление, таймкоды, настройки, описания, сессии, превью, SSE | 15, 29–32, 36, 37, 39, 53, 55, 57, 58, 65, 66, 69, 74, 79 |
 | `design/05-security-data-and-api.md` | Подписки, аутентификация, OAuth, модель данных, события, API, пустые архивные плейлисты | 10–14, 59 |
 | `design/06-infrastructure-and-operations.md` | SOCKS5/egress, Kubernetes, инциденты, синхронизация, повторы, nginx | 7, 16, 26, 42, 49, 60, 77 |
 

@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import reactor.core.publisher.Mono;
 
 @RestController
 class ArchivePreflightController {
@@ -25,7 +24,7 @@ class ArchivePreflightController {
     }
 
     @PostMapping("/api/v1/archive/estimate")
-    Mono<ResponseEntity<ArchivePreflightService.Estimate>> estimate(@RequestBody EstimateRequest request,
+    ResponseEntity<ArchivePreflightService.ProgressSnapshot> estimate(@RequestBody EstimateRequest request,
             HttpServletRequest httpRequest) {
         String username = username(httpRequest);
         ArchiveModels.Kind kind;
@@ -34,9 +33,7 @@ class ArchivePreflightController {
         } catch (RuntimeException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown archive kind");
         }
-        return preflights.estimate(kind, request.targetId(), username, request.estimateId())
-                .map(ResponseEntity::ok)
-                .defaultIfEmpty(ResponseEntity.noContent().build());
+        return ResponseEntity.accepted().body(preflights.start(kind, request.targetId(), username, request.estimateId()));
     }
 
     @GetMapping("/api/v1/archive/estimate/{estimateId}")

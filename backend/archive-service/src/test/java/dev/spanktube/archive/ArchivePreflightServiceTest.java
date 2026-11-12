@@ -221,6 +221,238 @@ class ArchivePreflightServiceTest {
     }
 
     @Test
+    void startReturnsProgressBeforeLongComputationFinishes() throws Exception {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(upstream.playlistVideos("playlist", null)).thenAnswer(invocation -> {
+            started.countDown();
+            release.await(10, TimeUnit.SECONDS);
+            return new UpstreamClient.PageItems(List.of("v1"), null);
+        });
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        when(catalog.existing("viewer", "v1")).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.ProgressSnapshot initial = service.start(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer", "estimate-id");
+
+            assertThat(initial.status()).isEqualTo("COLLECTING");
+            assertThat(initial.estimateId()).isEqualTo("estimate-id");
+            assertThat(started.await(2, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            ArchivePreflightService.ProgressSnapshot completed = service.status("viewer", "estimate-id");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!completed.status().equals("COMPLETED") && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+                completed = service.status("viewer", "estimate-id");
+            }
+            assertThat(completed.status()).isEqualTo("COMPLETED");
+            assertThat(completed.processedVideoCount()).isEqualTo(1);
+        } finally {
+            release.countDown();
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void acceptsMoreThanHundredPagesWhenCursorAdvances() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos(eq("playlist"), org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            String cursor = invocation.getArgument(1);
+            int page = cursor == null ? 0 : Integer.parseInt(cursor);
+            return new UpstreamClient.PageItems(List.of("v" + page), page == 100 ? null : String.valueOf(page + 1));
+        });
+        when(upstream.video(anyString())).thenAnswer(invocation -> download(invocation.getArgument(0)));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.totalVideoCount()).isEqualTo(101);
+            assertThat(estimate.videoIds()).hasSize(101);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void skipsOnlyAgeRestrictedVideosAndPreservesTheirReason() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1", "age", "v2"), null));
+        org.springframework.web.client.HttpClientErrorException age = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"ANTIBOT\",\"message\":\"Sign in to confirm your age\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("age")).thenThrow(age);
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        when(upstream.video("v2")).thenReturn(download("v2"));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.totalVideoCount()).isEqualTo(3);
+            assertThat(estimate.newVideoCount()).isEqualTo(2);
+            assertThat(estimate.skippedVideoCount()).isEqualTo(1);
+            assertThat(estimate.videoIds()).containsExactly("v1", "v2");
+            assertThat(estimate.totalBytes()).isEqualTo(3750);
+            assertThat(estimate.skippedVideos()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.videoId()).isEqualTo("age");
+                assertThat(skipped.reason()).contains("Sign in to confirm your age");
+            });
+            assertThat(service.status("viewer", estimate.estimateId()).skippedVideoCount()).isEqualTo(1);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void skipsCopyrightBlockedVideoAndPreservesItsReason() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1", "blocked", "v2"), null));
+        org.springframework.web.client.HttpClientErrorException blocked = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"FAILED\",\"message\":\"Video unavailable. It was blocked due to the claimed content by Nintendo.\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("blocked")).thenThrow(blocked);
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        when(upstream.video("v2")).thenReturn(download("v2"));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.totalVideoCount()).isEqualTo(3);
+            assertThat(estimate.newVideoCount()).isEqualTo(2);
+            assertThat(estimate.skippedVideoCount()).isEqualTo(1);
+            assertThat(estimate.videoIds()).containsExactly("v1", "v2");
+            assertThat(estimate.skippedVideos()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.videoId()).isEqualTo("blocked");
+                assertThat(skipped.reason()).contains("blocked due to the claimed content by Nintendo");
+            });
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void retriesTimeoutOnceAndCompletes() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null)).thenReturn(new UpstreamClient.PageItems(List.of("v1"), null));
+        org.springframework.web.client.HttpClientErrorException timeout = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"FAILED\",\"message\":\"yt-dlp timed out after PT1M\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("v1")).thenThrow(timeout).thenReturn(download("v1"));
+        when(catalog.existing("viewer", "v1")).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.totalVideoCount()).isEqualTo(1);
+            assertThat(estimate.skippedVideoCount()).isZero();
+            verify(upstream, times(2)).video("v1");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void doesNotSkipTemporaryUpstreamFailures() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null)).thenReturn(new UpstreamClient.PageItems(List.of("v1"), null));
+        org.springframework.web.client.HttpClientErrorException failure = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"FAILED\",\"message\":\"Connection timed out\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("v1")).thenThrow(failure);
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            assertThatThrownBy(() -> service.estimate(ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block())
+                    .isSameAs(failure);
+            verify(upstream, times(3)).video("v1");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void resumesFailedEstimateWithoutRecomputingCompletedVideos() throws Exception {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1", "v2"), null));
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        org.springframework.web.client.HttpClientErrorException timeout = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"FAILED\",\"message\":\"yt-dlp timed out after PT1M\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("v2")).thenThrow(timeout).thenThrow(timeout).thenThrow(timeout).thenReturn(download("v2"));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            assertThatThrownBy(() -> service.estimate(ArchiveModels.Kind.PLAYLIST, "playlist", "viewer", "resume-id").block())
+                    .isSameAs(timeout);
+            assertThat(service.status("viewer", "resume-id").status()).isEqualTo("FAILED");
+            assertThat(service.status("viewer", "resume-id").processedVideoCount()).isEqualTo(1);
+
+            ArchivePreflightService.ProgressSnapshot resumed = service.start(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer", "resume-id");
+            assertThat(resumed.status()).isNotEqualTo("FAILED");
+            ArchivePreflightService.ProgressSnapshot completed = service.status("viewer", "resume-id");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!completed.status().equals("COMPLETED") && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+                completed = service.status("viewer", "resume-id");
+            }
+
+            assertThat(completed.status()).isEqualTo("COMPLETED");
+            assertThat(completed.totalBytes()).isEqualTo(3750);
+            assertThat(completed.processedVideoCount()).isEqualTo(2);
+            verify(upstream, times(1)).video("v1");
+            verify(upstream, times(4)).video("v2");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void doesNotSkipOtherAntibotFailures() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null)).thenReturn(new UpstreamClient.PageItems(List.of("v1"), null));
+        org.springframework.web.client.HttpClientErrorException failure = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"ANTIBOT\",\"message\":\"Sign in to confirm you are not a bot\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("v1")).thenThrow(failure);
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            assertThatThrownBy(() -> service.estimate(ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block())
+                    .isSameAs(failure);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void preservesDownstreamErrorFromParallelCollection() {
         UpstreamClient upstream = mock(UpstreamClient.class);
         CatalogClient catalog = mock(CatalogClient.class);

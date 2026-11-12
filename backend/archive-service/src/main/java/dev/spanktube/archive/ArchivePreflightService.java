@@ -32,6 +32,7 @@ import reactor.core.scheduler.Schedulers;
 class ArchivePreflightService {
 
     private static final Duration ESTIMATE_TTL = Duration.ofMinutes(15);
+    private static final int MAX_SOURCE_PAGES = 1000;
 
     private final UpstreamClient upstreamClient;
     private final CatalogClient catalogClient;
@@ -53,6 +54,12 @@ class ArchivePreflightService {
         return estimate(kind, targetId, username, null);
     }
 
+    ProgressSnapshot start(ArchiveModels.Kind kind, String targetId, String username, String estimateId) {
+        String id = estimateId == null || estimateId.isBlank() ? UUID.randomUUID().toString() : estimateId;
+        estimate(kind, targetId, username, id).subscribe(estimate -> { }, error -> { });
+        return status(username, id);
+    }
+
     Mono<Estimate> estimate(ArchiveModels.Kind kind, String targetId, String username, String estimateId) {
         if (targetId == null || targetId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Archive target is required");
@@ -65,24 +72,35 @@ class ArchivePreflightService {
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Archive estimate already exists");
         }
-        Progress current = new Progress(id, kind, targetId, username, speedService);
-        if (progress.putIfAbsent(id, current) != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Archive estimate already exists");
+        Progress current = progress.get(id);
+        boolean resuming = current != null && current.isFailed()
+                && current.matches(kind, targetId, username);
+        if (resuming) {
+            current.restart();
+        } else {
+            if (current != null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Archive estimate already exists");
+            }
+            current = new Progress(id, kind, targetId, username, speedService);
+            if (progress.putIfAbsent(id, current) != null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Archive estimate already exists");
+            }
         }
-        return Mono.fromCallable(() -> compute(current)).subscribeOn(Schedulers.boundedElastic())
-                .filter(estimate -> !current.isCancelled())
+        Progress estimation = current;
+        return Mono.fromCallable(() -> compute(estimation)).subscribeOn(Schedulers.boundedElastic())
+                .filter(estimate -> !estimation.isCancelled())
                 .doOnNext(estimate -> {
                     estimates.put(estimate.estimateId(), estimate);
-                    current.complete(estimate);
+                    estimation.complete(estimate);
                 })
                 .doOnError(error -> {
-                    if (current.isCancelled() || error instanceof EstimateCancelledException) {
-                        current.cancel();
+                    if (estimation.isCancelled() || error instanceof EstimateCancelledException) {
+                        estimation.cancel();
                     } else {
-                        current.fail(error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+                        estimation.fail(error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
                     }
                 })
-                .onErrorResume(error -> current.isCancelled() || error instanceof EstimateCancelledException
+                .onErrorResume(error -> estimation.isCancelled() || error instanceof EstimateCancelledException
                         ? Mono.empty() : Mono.error(error));
     }
 
@@ -132,11 +150,17 @@ class ArchivePreflightService {
         }
         current.total(pages);
         List<CompletableFuture<VideoEstimate>> tasks = videoIds.stream()
-                .map(videoId -> CompletableFuture.supplyAsync(() -> estimateVideo(videoId, current.owner, current), executor)
-                        .thenApply(estimate -> {
-                            current.add(videoId, estimate);
-                            return estimate;
-                        }))
+                .map(videoId -> {
+                    VideoEstimate previous = current.completed(videoId);
+                    if (previous != null) {
+                        return CompletableFuture.completedFuture(previous);
+                    }
+                    return CompletableFuture.supplyAsync(() -> estimateVideo(videoId, current.owner, current), executor)
+                            .thenApply(estimate -> {
+                                current.add(videoId, estimate);
+                                return estimate;
+                            });
+                })
                 .toList();
         List<VideoEstimate> videos;
         try {
@@ -150,24 +174,71 @@ class ArchivePreflightService {
             throw error;
         }
         current.checkCancelled();
-        long videoBytes = videos.stream().filter(video -> !video.existing()).mapToLong(VideoEstimate::videoBytes).sum();
-        long audioBytes = videos.stream().filter(video -> !video.existing()).mapToLong(VideoEstimate::audioBytes).sum();
-        int existing = (int) videos.stream().filter(VideoEstimate::existing).count();
+        List<String> acceptedIds = new ArrayList<>();
+        List<SkippedVideo> skipped = new ArrayList<>();
+        for (int index = 0; index < videoIds.size(); index++) {
+            VideoEstimate video = videos.get(index);
+            if (video.skipped() == null) {
+                acceptedIds.add(videoIds.get(index));
+            } else {
+                skipped.add(video.skipped());
+            }
+        }
+        long videoBytes = videos.stream().filter(video -> video.skipped() == null && !video.existing())
+                .mapToLong(VideoEstimate::videoBytes).sum();
+        long audioBytes = videos.stream().filter(video -> video.skipped() == null && !video.existing())
+                .mapToLong(VideoEstimate::audioBytes).sum();
+        int existing = (int) videos.stream().filter(video -> video.skipped() == null && video.existing()).count();
         return new Estimate(current.id, current.kind, current.targetId, current.owner, videoIds.size(),
-                videoIds.size() - existing, existing, videoBytes, audioBytes, videoBytes + audioBytes,
+                acceptedIds.size() - existing, existing, videoBytes, audioBytes, videoBytes + audioBytes,
                 speedService.estimateSeconds(videoBytes, audioBytes), speedService.videoBps(), speedService.audioBps(),
-                videoIds, Instant.now());
+                skipped.size(), skipped, acceptedIds, Instant.now());
     }
 
     private VideoEstimate estimateVideo(String videoId, String username, Progress current) {
-        return current.call(() -> {
-            UpstreamClient.VideoDownload download = upstreamClient.video(videoId);
-            UpstreamClient.Selection selection = download.select(ArchiveModels.DownloadOptions.archiveDefaults());
-            long duration = download.metadata().durationSeconds() == null ? 0 : download.metadata().durationSeconds();
-            return new VideoEstimate(UpstreamClient.size(selection.video(), duration),
-                    UpstreamClient.size(selection.audio(), duration),
-                    catalogClient.existing(username, videoId).isPresent());
-        });
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return current.call(() -> {
+                    UpstreamClient.VideoDownload download = upstreamClient.video(videoId);
+                    UpstreamClient.Selection selection = download.select(ArchiveModels.DownloadOptions.archiveDefaults());
+                    long duration = download.metadata().durationSeconds() == null ? 0 : download.metadata().durationSeconds();
+                    return new VideoEstimate(UpstreamClient.size(selection.video(), duration),
+                            UpstreamClient.size(selection.audio(), duration),
+                            catalogClient.existing(username, videoId).isPresent());
+                });
+            } catch (org.springframework.web.client.RestClientException error) {
+                String reason = error instanceof org.springframework.web.client.RestClientResponseException response
+                        ? response.getResponseBodyAsString() : String.valueOf(error.getMessage());
+                if (permanentlyUnavailable(reason)) {
+                    return new VideoEstimate(0, 0, false, new SkippedVideo(videoId, reason));
+                }
+                if (attempt == 3 || !transientFailure(error, reason)) {
+                    throw error;
+                }
+            }
+        }
+        throw new IllegalStateException("Unreachable");
+    }
+
+    private static boolean transientFailure(org.springframework.web.client.RestClientException error, String reason) {
+        if (error instanceof org.springframework.web.client.ResourceAccessException) {
+            return true;
+        }
+        String normalized = reason.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("timed out") || normalized.contains("timeout")
+                || normalized.contains("prematurecloseexception") || normalized.contains("connection reset");
+    }
+
+    private static boolean permanentlyUnavailable(String reason) {
+        String normalized = reason.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("sign in to confirm your age")
+                || normalized.contains("video unavailable")
+                || normalized.contains("this video is not available")
+                || normalized.contains("this video is private")
+                || normalized.contains("private video")
+                || normalized.contains("this video has been removed")
+                || normalized.contains("this video is deleted")
+                || normalized.contains("no longer available");
     }
 
     List<String> allVideoIds(ArchiveModels.Kind kind, String targetId, java.util.Map<String, String> publishedAts) {
@@ -236,7 +307,7 @@ class ArchivePreflightService {
         Set<String> seenCursors = new LinkedHashSet<>();
         List<VideoPage> pages = new ArrayList<>();
         String cursor = null;
-        for (int sourcePage = 0; sourcePage < 100; sourcePage++) {
+        for (int sourcePage = 0; sourcePage < MAX_SOURCE_PAGES; sourcePage++) {
             if (current != null) {
                 current.checkCancelled();
             }
@@ -265,7 +336,7 @@ class ArchivePreflightService {
                 throw new ArchiveDownloadException("Archive pagination returned a repeated cursor");
             }
         }
-        throw new ArchiveDownloadException("Archive pagination exceeded 100 pages");
+        throw new ArchiveDownloadException("Archive pagination exceeded " + MAX_SOURCE_PAGES + " pages");
     }
 
     private static void merge(List<VideoPage> target, List<VideoPage> source, Set<String> ids) {
@@ -282,18 +353,26 @@ class ArchivePreflightService {
 
     record Estimate(String estimateId, ArchiveModels.Kind kind, String targetId, String owner,
             int totalVideoCount, int newVideoCount, int existingVideoCount, long videoBytes, long audioBytes,
-            long totalBytes, long estimatedSeconds, long videoBps, long audioBps, List<String> videoIds,
-            Instant createdAt) {
+            long totalBytes, long estimatedSeconds, long videoBps, long audioBps,
+            int skippedVideoCount, List<SkippedVideo> skippedVideos, List<String> videoIds, Instant createdAt) {
         Estimate {
+            skippedVideos = List.copyOf(skippedVideos);
             videoIds = List.copyOf(videoIds);
         }
+    }
+
+    record SkippedVideo(String videoId, String reason) {
     }
 
     record ProgressSnapshot(String estimateId, ArchiveModels.Kind kind, String targetId, String owner, String status,
             int totalVideoCount, int processedVideoCount, int newVideoCount, int existingVideoCount,
             long videoBytes, long audioBytes, long totalBytes, long estimatedSeconds, long videoBps, long audioBps,
             int discoveredVideoCount, int pageNumber, int pageVideoCount, int remainingOnPage,
-            double videosPerSecond, String error, Instant createdAt, Instant updatedAt) {
+            double videosPerSecond, String error, Instant createdAt, Instant updatedAt,
+            int skippedVideoCount, List<SkippedVideo> skippedVideos) {
+        ProgressSnapshot {
+            skippedVideos = List.copyOf(skippedVideos);
+        }
     }
 
     record ProgressEvent(String name, ProgressSnapshot progress) {
@@ -316,6 +395,8 @@ class ArchivePreflightService {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final Set<Thread> workers = ConcurrentHashMap.newKeySet();
         private final CopyOnWriteArrayList<Consumer<ProgressEvent>> listeners = new CopyOnWriteArrayList<>();
+        private final CopyOnWriteArrayList<SkippedVideo> skippedVideos = new CopyOnWriteArrayList<>();
+        private final ConcurrentHashMap<String, VideoEstimate> completedVideos = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, Integer> videoPages = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<Integer, Integer> pageSizes = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<Integer, AtomicInteger> pageRemaining = new ConcurrentHashMap<>();
@@ -342,6 +423,36 @@ class ArchivePreflightService {
             this.speedService = speedService;
             videoBps = speedService.videoBps();
             audioBps = speedService.audioBps();
+        }
+
+        private boolean matches(ArchiveModels.Kind kind, String targetId, String username) {
+            return this.kind == kind && this.targetId.equals(targetId) && this.owner.equals(username);
+        }
+
+        private boolean isFailed() {
+            return status.equals("FAILED");
+        }
+
+        private VideoEstimate completed(String videoId) {
+            return completedVideos.get(videoId);
+        }
+
+        private void restart() {
+            if (!workers.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Previous estimate is still finishing");
+            }
+            cancelled.set(false);
+            status = "COLLECTING";
+            error = null;
+            pagesOpened.set(0);
+            discoveredVideoCount.set(0);
+            totalVideoCount = 0;
+            pageNumber = 0;
+            pageVideoCount = 0;
+            remainingOnPage = 0;
+            analysisFinishedNanos = 0;
+            updatedAt = Instant.now();
+            emit("progress");
         }
 
         private int nextPageNumber() {
@@ -377,6 +488,7 @@ class ArchivePreflightService {
                 }
             }
             totalVideoCount = total;
+            restoreCompleted(pages);
             VideoPage first = pages.get(0);
             pageNumber = first.pageNumber();
             pageVideoCount = pageSizes.get(pageNumber);
@@ -388,17 +500,51 @@ class ArchivePreflightService {
             emit("progress");
         }
 
+        private void restoreCompleted(List<VideoPage> pages) {
+            processedVideoCount.set(0);
+            newVideoCount.set(0);
+            existingVideoCount.set(0);
+            videoBytes.set(0);
+            audioBytes.set(0);
+            skippedVideos.clear();
+            for (VideoPage page : pages) {
+                for (String videoId : page.videoIds()) {
+                    VideoEstimate estimate = completedVideos.get(videoId);
+                    if (estimate == null) {
+                        continue;
+                    }
+                    pageRemaining.get(page.pageNumber()).updateAndGet(value -> Math.max(0, value - 1));
+                    processedVideoCount.incrementAndGet();
+                    if (estimate.skipped() != null) {
+                        skippedVideos.add(estimate.skipped());
+                    } else if (estimate.existing()) {
+                        existingVideoCount.incrementAndGet();
+                    } else {
+                        newVideoCount.incrementAndGet();
+                        videoBytes.addAndGet(estimate.videoBytes());
+                        audioBytes.addAndGet(estimate.audioBytes());
+                    }
+                }
+            }
+            estimatedSeconds = speedService.estimateSeconds(videoBytes.get(), audioBytes.get());
+            videoBps = speedService.videoBps();
+            audioBps = speedService.audioBps();
+        }
+
         private void add(String videoId, VideoEstimate estimate) {
             if (isCancelled()) {
                 return;
             }
+            completedVideos.put(videoId, estimate);
             int page = videoPages.get(videoId);
             int remaining = pageRemaining.get(page).updateAndGet(value -> Math.max(0, value - 1));
             pageNumber = page;
             pageVideoCount = pageSizes.get(page);
             remainingOnPage = remaining;
             int processed = processedVideoCount.incrementAndGet();
-            if (estimate.existing()) {
+            if (estimate.skipped() != null) {
+                skippedVideos.add(estimate.skipped());
+            } else if (estimate.existing()) {
                 existingVideoCount.incrementAndGet();
             } else {
                 newVideoCount.incrementAndGet();
@@ -421,6 +567,8 @@ class ArchivePreflightService {
             processedVideoCount.set(totalVideoCount);
             newVideoCount.set(estimate.newVideoCount());
             existingVideoCount.set(estimate.existingVideoCount());
+            skippedVideos.clear();
+            skippedVideos.addAll(estimate.skippedVideos());
             videoBytes.set(estimate.videoBytes());
             audioBytes.set(estimate.audioBytes());
             estimatedSeconds = estimate.estimatedSeconds();
@@ -513,7 +661,8 @@ class ArchivePreflightService {
             return new ProgressSnapshot(id, kind, targetId, owner, status, totalVideoCount,
                     processedVideoCount.get(), newVideoCount.get(), existingVideoCount.get(), video, audio,
                     video + audio, estimatedSeconds, videoBps, audioBps, discoveredVideoCount.get(), pageNumber,
-                    pageVideoCount, remainingOnPage, videosPerSecond, error, createdAt, updatedAt);
+                    pageVideoCount, remainingOnPage, videosPerSecond, error, createdAt, updatedAt,
+                    skippedVideos.size(), List.copyOf(skippedVideos));
         }
     }
 
@@ -526,7 +675,10 @@ class ArchivePreflightService {
     private record CollectedPages(List<String> ids, List<VideoPage> pages) {
     }
 
-    private record VideoEstimate(long videoBytes, long audioBytes, boolean existing) {
+    private record VideoEstimate(long videoBytes, long audioBytes, boolean existing, SkippedVideo skipped) {
+        private VideoEstimate(long videoBytes, long audioBytes, boolean existing) {
+            this(videoBytes, audioBytes, existing, null);
+        }
     }
 
     private static final class EstimateCancelledException extends RuntimeException {

@@ -461,13 +461,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ArchiveEstimateRequest' }
       responses:
-        '200':
-          description: Estimated bytes and download time before the user confirms a batch archive
+        '202':
+          description: Estimation started and returns immediately. Completion and final totals arrive through the SSE stream and status endpoint.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ArchiveEstimate' }
-        '204':
-          description: Estimation was cancelled before a result became available
+              schema: { $ref: '#/components/schemas/ArchiveEstimateProgress' }
   /api/v1/archive/estimate/{estimateId}:
     get:
       operationId: getStage2ArchiveEstimateProgress
@@ -1174,7 +1172,7 @@ components:
         estimateId: { type: string, format: uuid, description: Optional client-generated id used for SSE estimation progress and cancellation }
     ArchiveEstimate:
       type: object
-      required: [estimateId, kind, targetId, owner, totalVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, videoIds, createdAt]
+      required: [estimateId, kind, targetId, owner, totalVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, skippedVideoCount, skippedVideos, videoIds, createdAt]
       properties:
         estimateId: { type: string, format: uuid }
         kind: { type: string, enum: [PLAYLIST, CHANNEL] }
@@ -1189,13 +1187,17 @@ components:
         estimatedSeconds: { type: integer, format: int64 }
         videoBps: { type: integer, format: int64 }
         audioBps: { type: integer, format: int64 }
+        skippedVideoCount: { type: integer }
+        skippedVideos:
+          type: array
+          items: { $ref: '#/components/schemas/SkippedVideo' }
         videoIds:
           type: array
           items: { type: string }
         createdAt: { type: string, format: date-time }
     ArchiveEstimateProgress:
       type: object
-      required: [estimateId, kind, targetId, owner, status, totalVideoCount, processedVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, discoveredVideoCount, pageNumber, pageVideoCount, remainingOnPage, videosPerSecond, createdAt, updatedAt]
+      required: [estimateId, kind, targetId, owner, status, totalVideoCount, processedVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, discoveredVideoCount, pageNumber, pageVideoCount, remainingOnPage, videosPerSecond, createdAt, updatedAt, skippedVideoCount, skippedVideos]
       properties:
         estimateId: { type: string, format: uuid }
         kind: { type: string, enum: [PLAYLIST, CHANNEL] }
@@ -1220,6 +1222,16 @@ components:
         error: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        skippedVideoCount: { type: integer }
+        skippedVideos:
+          type: array
+          items: { $ref: '#/components/schemas/SkippedVideo' }
+    SkippedVideo:
+      type: object
+      required: [videoId, reason]
+      properties:
+        videoId: { type: string }
+        reason: { type: string, description: Original upstream error, including the age-restriction message and recommended actions }
     ChannelArchiveStatus:
       type: object
       required: [lastArchivedAt, newVideoCount, newPlaylistCount]

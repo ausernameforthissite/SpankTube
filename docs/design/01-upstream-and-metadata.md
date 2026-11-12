@@ -81,7 +81,7 @@
 
 - На длинном канале обнаружен отдельный предел: Spring MVC завершал ожидание POST-оценки через 30 секунд с `AsyncRequestTimeoutException`, хотя сбор страниц продолжался и позже доходил до анализа видео. `spring.mvc.async.request-timeout` задаётся `ARCHIVE_ASYNC_TIMEOUT_MS` со значением по умолчанию `900000` (15 минут), согласованным с web nginx. Работа остаётся на `boundedElastic` и в ограниченном пуле, поэтому увеличение ожидания ответа не блокирует остальные HTTP-запросы и не заменяет отмену через SSE/DELETE.
 
-- `spring.cloud.gateway.httpclient.response-timeout` по умолчанию `900s`; точный nginx `location = /api/v1/archive/estimate` имеет `proxy_read_timeout 900s`. Это согласует весь путь длинной оценки с `ARCHIVE_ASYNC_TIMEOUT_MS`, не меняя 60-секундный предел остальных API и прежние media-настройки.
+- `spring.cloud.gateway.httpclient.response-timeout` по умолчанию `900s`; точный nginx `location = /api/v1/archive/estimate` имеет `proxy_read_timeout 900s`. Это согласует весь путь длинной оценки с `ARCHIVE_ASYNC_TIMEOUT_MS`, не меняя 60-секундный предел остальных API и прежние media-настройки. В разделе 80 реальный канал превысил и этот предел: POST стал немедленным `202`, а SSE оценки получил отдельный gateway-маршрут с отключённым response timeout.
 - Перед yt-dlp fallback для страниц выполняется один повтор NewPipe после любого не-egress сбоя, включая временный HTML вместо JSON. При повторной неудаче fallback и его настоящая ошибка не скрываются; `IllegalArgumentException` и недоступность egress не повторяются. Тесты подтверждают retry видео/страницы и сохранение преобразования continuation.
 
 
