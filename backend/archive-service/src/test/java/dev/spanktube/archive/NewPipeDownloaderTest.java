@@ -66,7 +66,7 @@ class NewPipeDownloaderTest {
         ArgumentCaptor<List> command = ArgumentCaptor.forClass(List.class);
         verify(processes).run(command.capture(), eq(directory), eq(Duration.ofMinutes(15)), eq(1500L), any(), any());
         assertThat(command.getValue().getFirst()).isEqualTo("ffmpeg");
-        assertThat(command.getValue()).contains("-c:s", "srt");
+        assertThat(command.getValue()).contains("-c:s", "srt", "-map", "2:0", "-map_metadata", "3", "-map_chapters", "3");
         assertThat(command.getValue().stream().map(String::valueOf)).doesNotContain("yt-dlp");
         assertThat(directory.resolve("video-track.mp4")).doesNotExist();
         assertThat(directory.resolve("audio-track.webm")).doesNotExist();

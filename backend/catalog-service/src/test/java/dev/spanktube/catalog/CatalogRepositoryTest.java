@@ -59,4 +59,46 @@ class CatalogRepositoryTest {
             assertThat(playlist.thumbnailUrl()).isEqualTo("/media/playlist/playlist/archive-thumbnail");
         });
     }
+
+    @Test
+    void sharedVideoHasIndependentMembershipInEachPlaylistAndUserLibrary() {
+        repository.upsertPlaylist(new LibraryModels.RegisterPlaylist(
+                "viewer", "first", "channel", "First", java.util.List.of("shared", "first-only")));
+        repository.upsertPlaylist(new LibraryModels.RegisterPlaylist(
+                "viewer", "second", "channel", "Second", java.util.List.of("shared")));
+        repository.upsertPlaylist(new LibraryModels.RegisterPlaylist(
+                "other", "first", "channel", "First", java.util.List.of("shared")));
+
+        String insert = "insert into library_playlist_items(user_id, playlist_id, video_id) values (?, ?, ?) on conflict do nothing";
+        verify(jdbc).update(insert, "viewer", "first", "shared");
+        verify(jdbc).update(insert, "viewer", "second", "shared");
+        verify(jdbc).update(insert, "other", "first", "shared");
+    }
+
+    @Test
+    void deleteRemovesAllOwnPlaylistLinksAndFileOnlyAfterLastOwner() {
+        String path = "channel/shared/video.mkv";
+        org.mockito.Mockito.when(jdbc.query(contains("select archived_path from user_views"),
+                org.mockito.ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<String>>any(),
+                eq("viewer"), eq("shared"))).thenReturn(path);
+        org.mockito.Mockito.when(jdbc.query(contains("select archived_path from user_views"),
+                org.mockito.ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<String>>any(),
+                eq("other"), eq("shared"))).thenReturn(path);
+        org.mockito.Mockito.when(jdbc.queryForObject(contains("select count(*) from user_views where video_id = ?"),
+                eq(Integer.class), eq("shared"))).thenReturn(1, 0);
+
+        assertThat(repository.deleteLink("viewer", "shared")).isNull();
+
+        verify(jdbc).update("delete from user_views where user_id = ? and video_id = ?", "viewer", "shared");
+        verify(jdbc).update("delete from library_playlist_items where user_id = ? and video_id = ?", "viewer", "shared");
+        verify(jdbc, org.mockito.Mockito.never()).update("delete from videos where video_id = ?", "shared");
+
+        assertThat(repository.deleteLink("other", "shared")).isEqualTo(path);
+
+        verify(jdbc).update("delete from user_views where user_id = ? and video_id = ?", "other", "shared");
+        verify(jdbc).update("delete from library_playlist_items where user_id = ? and video_id = ?", "other", "shared");
+        verify(jdbc).update(contains("update video_versions set superseded_at = now(), deleted_at = now()"),
+                eq("shared"), eq(path));
+        verify(jdbc).update("delete from videos where video_id = ?", "shared");
+    }
 }

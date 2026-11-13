@@ -126,6 +126,26 @@ class LibraryServiceTest {
                 .endsWith(".mkv");
     }
 
+    @Test
+    void manualDeleteKeepsSharedFileUntilLastOwner() throws Exception {
+        Path file = Files.createDirectories(archiveRoot.resolve("channel/shared")).resolve("video.mkv");
+        Files.writeString(file, "shared");
+        Files.writeString(file.getParent().resolve("info.json"), "{}");
+        when(repository.hasLink("first", "shared")).thenReturn(true);
+        when(repository.hasLink("second", "shared")).thenReturn(true);
+        when(repository.deleteLink("first", "shared")).thenReturn(null);
+        when(repository.deleteLink("second", "shared")).thenReturn("channel/shared/video.mkv");
+        LibraryService service = service();
+
+        assertThat(service.delete("first", "shared")).isTrue();
+        assertThat(file).exists();
+        assertThat(file.getParent().resolve("info.json")).exists();
+
+        assertThat(service.delete("second", "shared")).isTrue();
+        assertThat(file).doesNotExist();
+        assertThat(file.getParent()).doesNotExist();
+    }
+
     private LibraryService service() {
         return new LibraryService(repository, quotaClient, archiveRoot.toString());
     }

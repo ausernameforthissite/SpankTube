@@ -51,8 +51,8 @@ class NewPipeUpstreamProvider implements UpstreamProvider {
 
     NewPipeUpstreamProvider(@Qualifier("youtubeHttpClient") HttpClient httpClient,
             NewPipePageCodec pages, ObjectProvider<EgressProbe> egressProbe, LiveDashClient liveDashClient,
-            BgutilPoTokenProvider poTokenProvider) {
-        NewPipe.init(new ReactorNettyDownloader(httpClient));
+            BgutilPoTokenProvider poTokenProvider, ObjectProvider<YouTubeCookieStore> cookies) {
+        NewPipe.init(new ReactorNettyDownloader(httpClient, cookies.getIfAvailable()));
         org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExtractor
                 .setPoTokenProvider(poTokenProvider);
         this.pages = pages;

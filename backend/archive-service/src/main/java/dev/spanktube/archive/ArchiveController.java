@@ -86,7 +86,28 @@ class ArchiveController {
             @RequestParam String estimateId) {
         ArchivePreflightService.Estimate estimate = preflights.validate(estimateId, ArchiveModels.Kind.CHANNEL,
                 channelId, username(request));
+        registerChannelPlaylists(channelId, username(request));
         return enqueue(ArchiveModels.Kind.CHANNEL, channelId, estimate.videoIds(), request);
+    }
+
+    private void registerChannelPlaylists(String channelId, String username) {
+        String cursor = null;
+        do {
+            UpstreamClient.PageItems page = upstreamClient.channelPlaylists(channelId, cursor);
+            for (String playlistId : page.ids()) {
+                UpstreamClient.PlaylistArchive archive = upstreamClient.playlistArchive(playlistId);
+                java.util.LinkedHashSet<String> videoIds = new java.util.LinkedHashSet<>();
+                String videoCursor = null;
+                do {
+                    UpstreamClient.PageItems videos = upstreamClient.playlistVideos(playlistId, videoCursor);
+                    videoIds.addAll(videos.ids());
+                    videoCursor = videos.nextCursor();
+                } while (videoCursor != null);
+                catalogClient.registerPlaylist(username, playlistId, archive.title(), archive.channelId(),
+                        java.util.List.copyOf(videoIds));
+            }
+            cursor = page.nextCursor();
+        } while (cursor != null);
     }
 
     @GetMapping("/api/v1/archive/jobs")

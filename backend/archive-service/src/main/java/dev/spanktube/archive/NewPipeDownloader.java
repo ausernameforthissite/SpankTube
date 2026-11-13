@@ -108,6 +108,7 @@ class NewPipeDownloader implements ArchiveDownloader {
                             Math.round(segment.endSeconds() * 1000)));
                 }
             }
+            inputs.addAll(subtitles);
             Path chapterFile = directory.resolve("chapters.ffmeta");
             Files.writeString(chapterFile, chapterMetadata(chapters, metadata.durationSeconds()));
             inputs.add(chapterFile);
@@ -118,7 +119,7 @@ class NewPipeDownloader implements ArchiveDownloader {
             List<String> command = new ArrayList<>();
             command.add(ffmpegExecutable);
             command.add("-y");
-            int trackInputs = inputs.size() - 1;
+            int trackInputs = inputs.size() - subtitles.size() - 1;
             for (Path input : inputs) {
                 command.add("-i");
                 command.add(input.toString());

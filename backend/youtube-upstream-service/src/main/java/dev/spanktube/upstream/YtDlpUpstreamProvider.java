@@ -211,6 +211,10 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
             command.add("--proxy");
             command.add(proxyUrl());
         }
+        if (!properties.cookiesFile().isBlank()) {
+            command.add("--cookies");
+            command.add(properties.cookiesFile());
+        }
         command.addAll(properties.extraArgs());
         command.addAll(additionalArguments);
 
@@ -223,7 +227,7 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
                 process.destroyForcibly();
                 throw UpstreamException.failed("yt-dlp timed out after " + properties.timeout());
             }
-            String errors = stderr.get(2, TimeUnit.SECONDS);
+            String errors = readOutput(stderr, "stderr", properties.timeout().toMillis());
             if (process.exitValue() != 0) {
                 String message = sanitize(errors);
                 String normalized = message.toLowerCase(Locale.ROOT);
@@ -234,8 +238,8 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
                 }
                 throw UpstreamException.failed("yt-dlp exited with code " + process.exitValue() + ": " + message);
             }
-            return stdout.get(2, TimeUnit.SECONDS);
-        } catch (IOException | ExecutionException | TimeoutException error) {
+            return readOutput(stdout, "stdout", properties.timeout().toMillis());
+        } catch (IOException | ExecutionException error) {
             throw UpstreamException.failed("Unable to execute yt-dlp: " + error.getMessage(), error);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -244,6 +248,15 @@ class YtDlpUpstreamProvider implements UpstreamProvider {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
             }
+        }
+    }
+
+    static String readOutput(CompletableFuture<String> output, String stream, long timeout)
+            throws ExecutionException, InterruptedException {
+        try {
+            return output.get(Math.min(10_000, timeout), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException error) {
+            throw UpstreamException.failed("yt-dlp " + stream + " read timed out after process exit", error);
         }
     }
 

@@ -34,3 +34,4 @@ spanktube:
     executable: ${YT_DLP_EXECUTABLE:yt-dlp}
     timeout: 60s
     extra-args: ${YT_DLP_EXTRA_ARGS:}
+    cookies-file: ${YOUTUBE_COOKIES_FILE:}

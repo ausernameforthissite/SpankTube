@@ -1265,19 +1265,24 @@ export default function App() {
 
   const saveCollection = async (path: string, kind: "PLAYLIST" | "CHANNEL", title: string, targetId: string,
     resumeEstimateId?: string) => {
-    setError(null);
-    if (!resumeEstimateId) stopArchiveEstimate(false);
-    const controller = new AbortController();
-    archiveEstimateAbortRef.current = controller;
-    const estimateId = resumeEstimateId || newEstimateId();
-    archiveEstimateActiveRef.current = estimateId;
-    setArchiveCandidate({ path, title, kind, targetId });
-    setArchiveEstimate(null);
-    setArchiveEstimateId(resumeEstimateId || null);
-    setArchiveEstimateProgress(null);
-    setArchiveEstimateLoading(true);
-    setPopup("archiveEstimate");
+    let controller: AbortController | null = null;
     try {
+      setError(null);
+      if (!resumeEstimateId) stopArchiveEstimate(false);
+      controller = new AbortController();
+      archiveEstimateAbortRef.current = controller;
+      const estimateId = resumeEstimateId || newEstimateId();
+      archiveEstimateActiveRef.current = estimateId;
+      setArchiveCandidate({ path, title, kind, targetId });
+      setArchiveEstimate(null);
+      setArchiveEstimateId(resumeEstimateId || null);
+      setArchiveEstimateProgress(null);
+      setArchiveEstimateLoading(true);
+      popupAnchorRef.current = null;
+      const width = Math.min(540, window.innerWidth - 48);
+      setPopupPosition({ left: Math.max(24, (window.innerWidth - width) / 2), top: 66,
+        width, maxHeight: window.innerHeight - 48 });
+      setPopup("archiveEstimate");
       const response = await apiFetch("/api/v1/archive/estimate", {
         method: "POST", body: JSON.stringify({ kind, targetId, estimateId }), signal: controller.signal,
       });
@@ -1653,14 +1658,20 @@ export default function App() {
     }
   }, [apiFetch, showError]);
 
-  const remove = async (item: LibraryItem) => {
-    if (!window.confirm(`Удалить «${item.title}» из своей библиотеки?`)) return;
+  const remove = async (item: LibraryItem): Promise<boolean> => {
+    if (!window.confirm(`Удалить «${item.title}» из своей библиотеки?`)) return false;
     try {
       await apiFetch(`/api/v1/library/${item.videoId}`, { method: "DELETE" });
+    } catch (reason) {
+      showError(reason);
+      return false;
+    }
+    try {
       await loadLibrary();
     } catch (reason) {
       showError(reason);
     }
+    return true;
   };
 
   const updateQuota = async (name: string) => {

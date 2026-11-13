@@ -28,7 +28,7 @@ type LibraryViewProps = {
   sortMode: string;
   onSortModeChange: (mode: string) => void;
   onDownload: (item: LibraryItem) => void;
-  onRemove: (item: LibraryItem) => void;
+  onRemove: (item: LibraryItem) => Promise<boolean>;
   hideTechnicalDetails: boolean;
   progressMap: WatchProgressMap;
 };
@@ -73,6 +73,12 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
     navigate(`/library${suffix ? `?${suffix}` : ""}`);
   };
 
+  const removeItem = async (item: LibraryItem) => {
+    if (await onRemove(item)) {
+      setPlaylistItems(current => current.filter(candidate => candidate.videoId !== item.videoId));
+    }
+  };
+
   const selectedChannel = channelId ? library.channels.find(group => group.channel.channelId === channelId) : null;
   const items = playlistId && playlistId !== "none" ? playlistItems : selectedChannel?.videos || [];
   const visibleItems = videoId ? items.filter(item => item.videoId === videoId) : items;
@@ -100,7 +106,7 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4" /></svg>
         </button>
         <button className="icon-button danger row-icon-action" aria-label="Удалить" title="Удалить"
-          onClick={() => onRemove(item)}>
+          onClick={() => void removeItem(item)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6m4-6v6" /></svg>
         </button>
         <button className="card-menu-button row-menu-button" aria-label="Действия с видео" title="Действия с видео"
@@ -109,7 +115,7 @@ export function LibraryView({ library, query, role, navigate, apiFetch, sortMode
           <button className="library-menu-backdrop" aria-label="Закрыть меню" onClick={() => setMenuItem(null)} />
           <div className="library-row-menu">
             <CardContextMenu onDownloadMkv={() => { setMenuItem(null); onDownload(item); }}
-              onRemove={() => { setMenuItem(null); onRemove(item); }} />
+              onRemove={() => { setMenuItem(null); void removeItem(item); }} />
           </div>
         </>}
       </div>

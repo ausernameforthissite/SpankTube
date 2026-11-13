@@ -5,7 +5,7 @@
 
 ## 1. Цели и область
 
-Самохостируемый прокси для YouTube, разворачиваемый в локальном кластере Kubernetes. Кластер смотрит в сеть с фильтрацией Роскомнадзора («чебурнет»), прямой доступ к YouTube невозможен — весь исходящий YouTube-трафик идёт через **единый настраиваемый SOCKS5-прокси** (существующий danted в локальной сети, проверен на Telegram; резервный режим — VM с VPN-клиентом в роли default gateway). Клиенты (веб и Android) работают исключительно с API прокси и сами к YouTube не обращаются.
+Самохостируемый прокси для YouTube, разворачиваемый в локальном кластере Kubernetes. Кластер смотрит в сеть с фильтрацией Роскомнадзора («чебурнет»), поэтому исходящий YouTube-трафик идёт через настраиваемый `egress-starter`: SOCKS5 danted либо direct через VM с VPN в роли default gateway. Текущий Docker playback-path использует direct через b4 `192.168.88.175` (раздел 86). Клиенты (веб и Android) работают исключительно с API прокси и сами к YouTube не обращаются.
 
 Функциональные требования:
 
@@ -69,9 +69,8 @@
                 │  весь YouTube-трафик (upstream, media, archive, RSS/WebSub)
                 ▼
         ┌───────────────────┐
-        │  SOCKS5 egress:   │  (ConfigMap spanktube-egress + Secret;
-        │  danted в LAN,    │   режим direct = VPN-VM gateway)
-        │  remote DNS       │
+        │  Egress:          │  (SOCKS5 danted с remote DNS;
+        │  SOCKS5 / direct  │   direct = VPN-VM gateway)
         └───────────────────┘
                 │
         PostgreSQL │ Redis │ NFS PVC (/archive)

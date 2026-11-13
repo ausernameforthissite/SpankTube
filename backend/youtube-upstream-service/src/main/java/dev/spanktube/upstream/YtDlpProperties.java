@@ -6,7 +6,7 @@ import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("spanktube.yt-dlp")
-public record YtDlpProperties(String executable, Duration timeout, List<String> extraArgs) {
+public record YtDlpProperties(String executable, Duration timeout, List<String> extraArgs, String cookiesFile) {
 
     public YtDlpProperties {
         if (executable == null || executable.isBlank()) {
@@ -18,5 +18,6 @@ public record YtDlpProperties(String executable, Duration timeout, List<String> 
         if (extraArgs == null) {
             extraArgs = List.of();
         }
+        cookiesFile = cookiesFile == null ? "" : cookiesFile;
     }
 }

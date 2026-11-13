@@ -21,9 +21,15 @@ final class ReactorNettyDownloader extends Downloader {
     private static final String USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
     private final HttpClient httpClient;
+    private final YouTubeCookieStore cookies;
 
     ReactorNettyDownloader(HttpClient httpClient) {
+        this(httpClient, null);
+    }
+
+    ReactorNettyDownloader(HttpClient httpClient, YouTubeCookieStore cookies) {
         this.httpClient = httpClient.httpResponseDecoder(spec -> spec.maxHeaderSize(64 * 1024));
+        this.cookies = cookies;
     }
 
     @Override
@@ -39,6 +45,13 @@ final class ReactorNettyDownloader extends Downloader {
                             headers.set("User-Agent", USER_AGENT);
                         }
                         request.headers().forEach((name, values) -> headers.add(name, values));
+                        if (cookies != null) {
+                            cookies.cookieHeader(java.net.URI.create(requestedUrl)).ifPresent(accountCookie -> {
+                                String existing = headers.get("Cookie");
+                                headers.set("Cookie", existing == null || existing.isBlank()
+                                        ? accountCookie : existing + "; " + accountCookie);
+                            });
+                        }
                     })
                     .request(io.netty.handler.codec.http.HttpMethod.valueOf(request.httpMethod()))
                     .uri(requestedUrl)
