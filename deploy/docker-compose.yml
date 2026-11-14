@@ -96,7 +96,6 @@ services:
   bgutil-pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
     restart: unless-stopped
-    profiles: ["legacy-socks5"]
 
   youtube-upstream-service:
     build:
@@ -105,18 +104,26 @@ services:
       args: *backend-build-args
     image: spanktube/youtube-upstream-service:0.2.0
     restart: unless-stopped
-    profiles: ["legacy-socks5"]
+    entrypoint: ["sh", "-c", "cp /run/secrets/youtube-cookies.txt /tmp/youtube-cookies.txt && chmod 600 /tmp/youtube-cookies.txt && exec java -jar /app/app.jar"]
     depends_on:
       redis:
         condition: service_healthy
       bgutil-pot-provider:
         condition: service_started
     environment:
-      <<: *egress-environment
+      EGRESS_MODE: direct
+      EGRESS_HOST: ""
+      EGRESS_PORT: "1080"
+      EGRESS_USERNAME: ""
+      EGRESS_PASSWORD: ""
+      EGRESS_REMOTE_DNS: "false"
       JAVA_TOOL_OPTIONS: -Xmx320m
       REDIS_HOST: redis
       BGUTIL_POT_PROVIDER_URL: http://bgutil-pot-provider:4416
       YT_DLP_EXTRA_ARGS: "--extractor-args,youtubepot-bgutilhttp:base_url=http://bgutil-pot-provider:4416"
+      YOUTUBE_COOKIES_FILE: /tmp/youtube-cookies.txt
+    volumes:
+      - /root/.secrets/youtube-cookies.txt:/run/secrets/youtube-cookies.txt:ro
     ports:
       - "127.0.0.1:8081:8081"
 
@@ -128,12 +135,13 @@ services:
     image: spanktube/media-service:0.2.0
     restart: unless-stopped
     depends_on:
+      - youtube-upstream-service
       - catalog-service
     environment:
       <<: *egress-environment
       EGRESS_MODE: ${MEDIA_EGRESS_MODE:-direct}
-      JAVA_TOOL_OPTIONS: -Xmx320m
-      UPSTREAM_SERVICE_URL: ${UPSTREAM_SERVICE_URL:-http://192.168.88.174:8081}
+      JAVA_TOOL_OPTIONS: -Xmx320m -Dio.netty.allocator.type=pooled
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
       CATALOG_SERVICE_URL: http://catalog-service:8084
       ARCHIVE_ROOT: /archive
     volumes:
@@ -157,12 +165,14 @@ services:
         condition: service_healthy
       user-service:
         condition: service_started
+      youtube-upstream-service:
+        condition: service_started
     environment:
       <<: [*database-environment]
       JAVA_TOOL_OPTIONS: -Xmx320m
       POSTGRES_DB: catalog
       USER_SERVICE_URL: http://user-service:8083
-      UPSTREAM_SERVICE_URL: ${UPSTREAM_SERVICE_URL:-http://192.168.88.174:8081}
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
       ARCHIVE_ROOT: /archive
     volumes:
       - /mnt/spanktube:/archive
@@ -185,11 +195,13 @@ services:
         condition: service_started
       user-service:
         condition: service_started
+      youtube-upstream-service:
+        condition: service_started
     environment:
       <<: [*egress-environment, *database-environment]
       JAVA_TOOL_OPTIONS: -Xmx384m
       POSTGRES_DB: archive
-      UPSTREAM_SERVICE_URL: ${UPSTREAM_SERVICE_URL:-http://192.168.88.174:8081}
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
       MEDIA_SERVICE_URL: http://media-service:8082
       CATALOG_SERVICE_URL: http://catalog-service:8084
       USER_SERVICE_URL: http://user-service:8083
@@ -213,6 +225,7 @@ services:
     restart: unless-stopped
     depends_on:
       - user-service
+      - youtube-upstream-service
       - media-service
       - catalog-service
       - archive-service
@@ -220,7 +233,7 @@ services:
       JAVA_TOOL_OPTIONS: -Xmx256m
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?set JWT_PUBLIC_KEY}
       USER_SERVICE_URL: http://user-service:8083
-      UPSTREAM_SERVICE_URL: ${UPSTREAM_SERVICE_URL:-http://192.168.88.174:8081}
+      UPSTREAM_SERVICE_URL: http://youtube-upstream-service:8081
       MEDIA_SERVICE_URL: http://media-service:8082
       CATALOG_SERVICE_URL: http://catalog-service:8084
       ARCHIVE_SERVICE_URL: http://archive-service:8085

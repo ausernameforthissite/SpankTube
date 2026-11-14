@@ -29,4 +29,9 @@ class VideoController {
     Mono<VideoDetails> internalVideo(@PathVariable String videoId) {
         return videoService.video(videoId);
     }
+
+    @org.springframework.web.bind.annotation.PostMapping("/internal/v1/videos/{videoId}/refresh")
+    Mono<VideoDetails> refresh(@PathVariable String videoId) {
+        return videoService.refresh(videoId);
+    }
 }

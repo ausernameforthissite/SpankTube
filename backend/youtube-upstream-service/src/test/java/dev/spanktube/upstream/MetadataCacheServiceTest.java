@@ -62,6 +62,15 @@ class MetadataCacheServiceTest {
         }, Duration.ofMinutes(5)).block()).isEqualTo(expected);
     }
 
+    @Test
+    void evictsOnlyTheRequestedStreamMetadata() {
+        when(redis.delete("spanktube:streams:v3:direct:dQw4w9WgXcQ")).thenReturn(reactor.core.publisher.Mono.just(1L));
+
+        cache.evict("streams:v3", "dQw4w9WgXcQ").block();
+
+        verify(redis).delete("spanktube:streams:v3:direct:dQw4w9WgXcQ");
+    }
+
     private static SearchResults load(SearchResults expected, AtomicInteger loads,
             CountDownLatch started, CountDownLatch release) {
         loads.incrementAndGet();

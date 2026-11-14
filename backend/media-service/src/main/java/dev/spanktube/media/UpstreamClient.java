@@ -20,6 +20,13 @@ class UpstreamClient {
                 .bodyToMono(UpstreamVideo.class);
     }
 
+    Mono<UpstreamVideo> refresh(String videoId) {
+        return webClient.post()
+                .uri("/internal/v1/videos/{videoId}/refresh", videoId)
+                .retrieve()
+                .bodyToMono(UpstreamVideo.class);
+    }
+
     Mono<String> avatar(String channelId) {
         return webClient.get()
                 .uri("/internal/v1/channels/{channelId}", channelId)

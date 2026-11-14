@@ -28,6 +28,10 @@ public class VideoService {
                 details -> details.isLive() ? LIVE_CACHE_TTL : CACHE_TTL);
     }
 
+    public Mono<VideoDetails> refresh(String videoId) {
+        return cache.evict("streams:v3", videoId).then(video(videoId));
+    }
+
     private static void validateVideoId(String videoId) {
         if (videoId == null || !videoId.matches(VIDEO_ID_PATTERN)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "videoId must contain 11 YouTube ID characters");

@@ -42,6 +42,10 @@ class MetadataCacheService {
                 }));
     }
 
+    Mono<Void> evict(String namespace, String id) {
+        return redis.delete(cacheKey(namespace, id)).then();
+    }
+
     private <T> Mono<T> loadAndCache(String key, Supplier<T> loader, Function<T, Duration> ttl) {
         return Mono.fromCallable(loader::get)
                 .subscribeOn(Schedulers.boundedElastic())

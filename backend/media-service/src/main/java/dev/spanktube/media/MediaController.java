@@ -19,12 +19,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.netty.http.client.HttpClient;
 
 @RestController
 class MediaController {
@@ -53,7 +51,7 @@ class MediaController {
     private final MediaRedirectCache redirectCache;
 
     MediaController(UpstreamClient upstreamClient, Mp4IndexService mp4IndexService,
-            DashManifestGenerator manifestGenerator, @Qualifier("youtubeHttpClient") HttpClient youtubeHttpClient,
+            DashManifestGenerator manifestGenerator, @Qualifier("youtubeWebClient") WebClient youtubeClient,
             MediaRedirectCache redirectCache, ObjectProvider<EgressProbe> egressProbe, ArchivePlaybackService archivePlayback,
             ThumbnailService thumbnailService, PlaybackLogService playbackLogs, ProgressiveDashService progressiveDash,
             LiveDashService liveDash, LiveHlsService liveHls) {
@@ -61,9 +59,7 @@ class MediaController {
         this.mp4IndexService = mp4IndexService;
         this.manifestGenerator = manifestGenerator;
         this.redirectCache = redirectCache;
-        this.youtubeClient = WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(youtubeHttpClient))
-                .build();
+        this.youtubeClient = youtubeClient;
         this.egressProbe = egressProbe.getIfAvailable();
         this.archivePlayback = archivePlayback;
         this.thumbnailService = thumbnailService;
@@ -160,14 +156,25 @@ class MediaController {
     Mono<ResponseEntity<Flux<DataBuffer>>> segment(@PathVariable String videoId,
             @PathVariable String formatId, @RequestHeader HttpHeaders requestHeaders) {
         return upstreamClient.video(videoId)
-                .flatMap(video -> video.formats().stream()
-                        .filter(format -> format.trackId().equals(formatId) || format.formatId().equals(formatId))
-                        .sorted(java.util.Comparator.comparingInt(format -> Boolean.TRUE.equals(format.original()) ? 0 : 1))
-                        .findFirst()
-                        .map(format -> proxy(MediaUrlValidator.mediaUrl(format.url()), requestHeaders,
-                                format.mimeType()))
-                        .orElseGet(() -> Mono.error(new ResponseStatusException(
-                                HttpStatus.NOT_FOUND, "Unknown format " + formatId))));
+                .flatMap(video -> segment(videoId, formatId, requestHeaders, video, true));
+    }
+
+    private Mono<ResponseEntity<Flux<DataBuffer>>> segment(String videoId, String formatId, HttpHeaders requestHeaders,
+            UpstreamVideo video, boolean refreshOnForbidden) {
+        return video.formats().stream()
+                .filter(format -> format.trackId().equals(formatId) || format.formatId().equals(formatId))
+                .sorted(java.util.Comparator.comparingInt(format -> Boolean.TRUE.equals(format.original()) ? 0 : 1))
+                .findFirst()
+                .map(format -> proxy(MediaUrlValidator.mediaUrl(format.url()), requestHeaders, format.mimeType()))
+                .orElseGet(() -> Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Unknown format " + formatId)))
+                .onErrorResume(org.springframework.web.reactive.function.client.WebClientResponseException.Forbidden.class,
+                        error -> {
+                            if (!refreshOnForbidden) {
+                                return Mono.error(error);
+                            }
+                            return upstreamClient.refresh(videoId)
+                                    .flatMap(refreshed -> segment(videoId, formatId, requestHeaders, refreshed, false));
+                        });
     }
 
     @GetMapping("/media/v/{videoId}/live/segment")
