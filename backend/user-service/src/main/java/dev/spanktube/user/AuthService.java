@@ -45,6 +45,21 @@ class AuthService {
         return issueTokens(username, account.role());
     }
 
+    boolean accountExists(String username) {
+        return account(username) != null;
+    }
+
+    void resetPassword(String username, String password) {
+        AuthProperties.Account account = account(username);
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+        }
+        jdbc.update("insert into local_users(username, password_hash, role) values (?, ?, ?) "
+                        + "on conflict(username) do update set password_hash = excluded.password_hash, role = excluded.role",
+                username, passwordEncoder.encode(password), account.role().name());
+        refreshTokenService.revokeUser(username);
+    }
+
     TokenPair issueTokens(String username, AuthProperties.Role role) {
         JwtService.IssuedAccessToken access = jwtService.issue(username, role);
         RefreshTokenService.IssuedRefreshToken refresh = refreshTokenService.issue(username);
@@ -56,17 +71,14 @@ class AuthService {
         if (username == null) {
             return null;
         }
-        AuthProperties.Account configured = properties.users().get(username);
-        if (configured != null) {
-            return configured;
-        }
-        return jdbc.query("select password_hash, role from local_users where username = ?", rs -> {
+        AuthProperties.Account local = jdbc.query("select password_hash, role from local_users where username = ?", rs -> {
             if (!rs.next()) {
                 return null;
             }
             return new AuthProperties.Account(rs.getString("password_hash"),
                     AuthProperties.Role.valueOf(rs.getString("role")));
         }, username);
+        return local != null ? local : properties.users().get(username);
     }
 
     record TokenPair(String accessToken, String tokenType, long expiresIn,

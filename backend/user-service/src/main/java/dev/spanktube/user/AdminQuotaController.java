@@ -1,6 +1,5 @@
 package dev.spanktube.user;
 
-import java.util.Comparator;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
@@ -17,13 +16,14 @@ import org.springframework.web.bind.annotation.RestController;
 class AdminQuotaController {
 
     private final QuotaService quotaService;
-    private final AuthProperties authProperties;
     private final CatalogUsageClient usageClient;
+    private final LocalFileAccessService localFileAccess;
 
-    AdminQuotaController(QuotaService quotaService, AuthProperties authProperties, CatalogUsageClient usageClient) {
+    AdminQuotaController(QuotaService quotaService, CatalogUsageClient usageClient,
+            LocalFileAccessService localFileAccess) {
         this.quotaService = quotaService;
-        this.authProperties = authProperties;
         this.usageClient = usageClient;
+        this.localFileAccess = localFileAccess;
     }
 
     @GetMapping("/internal/v1/users/{username}/quota")
@@ -34,12 +34,12 @@ class AdminQuotaController {
     @GetMapping("/api/v1/admin/users")
     @PreAuthorize("hasRole('ADMIN')")
     List<AdminUserQuota> users() {
-        return authProperties.users().keySet().stream()
-                .sorted(Comparator.naturalOrder())
+        return localFileAccess.knownUsernames().stream()
                 .map(username -> {
                     QuotaService.UserQuota quota = quotaService.resolve(username);
                     return new AdminUserQuota(quota.username(), quota.role(), quota.quotaBytes(),
-                            usageClient.usedBytes(username), quota.effectiveQuotaBytes(), quota.lruThresholdPercent());
+                            usageClient.usedBytes(username), quota.effectiveQuotaBytes(), quota.lruThresholdPercent(),
+                            localFileAccess.access(username).enabled());
                 })
                 .toList();
     }
@@ -49,7 +49,8 @@ class AdminQuotaController {
     AdminUserQuota userQuota(@PathVariable String username) {
         QuotaService.UserQuota quota = quotaService.resolve(username);
         return new AdminUserQuota(quota.username(), quota.role(), quota.quotaBytes(),
-                usageClient.usedBytes(username), quota.effectiveQuotaBytes(), quota.lruThresholdPercent());
+                usageClient.usedBytes(username), quota.effectiveQuotaBytes(), quota.lruThresholdPercent(),
+                localFileAccess.access(username).enabled());
     }
 
     @PutMapping("/api/v1/admin/users/{username}/quota")
@@ -64,6 +65,18 @@ class AdminQuotaController {
         return quotaService.update(username, null);
     }
 
+    @GetMapping("/internal/v1/users/{username}/local-files-access")
+    LocalFileAccessService.LocalFileAccess localFilesAccess(@PathVariable String username) {
+        return localFileAccess.access(username);
+    }
+
+    @PutMapping("/api/v1/admin/users/{username}/local-files-access")
+    @PreAuthorize("hasRole('ADMIN')")
+    LocalFileAccessService.LocalFileAccess updateLocalFilesAccess(@PathVariable String username,
+            @RequestBody LocalFileAccessUpdate update) {
+        return localFileAccess.update(username, update.enabled());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<String> badRequest(IllegalArgumentException error) {
         return ResponseEntity.badRequest().body(error.getMessage());
@@ -72,7 +85,10 @@ class AdminQuotaController {
     record QuotaUpdate(Long quotaBytes) {
     }
 
+    record LocalFileAccessUpdate(Boolean enabled) {
+    }
+
     record AdminUserQuota(String username, AuthProperties.Role role, Long quotaBytes,
-            long usedBytes, long effectiveQuotaBytes, int lruThresholdPercent) {
+            long usedBytes, long effectiveQuotaBytes, int lruThresholdPercent, boolean localFilesAccess) {
     }
 }

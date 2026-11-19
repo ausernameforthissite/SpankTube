@@ -41,6 +41,18 @@ class OnDemandDashServiceTest {
     }
 
     @Test
+    void readsJsonKeyframesWithoutCsvPunctuation() throws Exception {
+        var metadata = new ObjectMapper().readTree("{\"frames\":["
+                + "{\"best_effort_timestamp_time\":\"0.000000\"},"
+                + "{\"best_effort_timestamp_time\":\"2.000000\"},"
+                + "{\"best_effort_timestamp_time\":\"2.000000\"},"
+                + "{\"best_effort_timestamp_time\":\"N/A\"},"
+                + "{\"best_effort_timestamp_time\":\"4.000000\"}]}");
+
+        assertThat(OnDemandDashService.keyframeTimestamps(metadata)).containsExactly(0.0, 2.0, 4.0);
+    }
+
+    @Test
     void preservesAbsoluteDecodeTimeInRequestedFragment() {
         TestService service = new TestService();
 
@@ -51,6 +63,99 @@ class OnDemandDashServiceTest {
         assertThat(command).containsSequence("-avoid_negative_ts", "disabled");
         assertThat(command).contains("frag_keyframe+empty_moov+default_base_moof+frag_discont");
         assertThat(command).doesNotContain("-start_at_zero", "-output_ts_offset");
+    }
+
+    @Test
+    void convertsUnsupportedLocalAudioToAacWithoutChangingArchiveCommand() {
+        TestService service = new TestService();
+
+        List<String> command = service.fragmentCommand(directory.resolve("source.mkv"), false, 1, true,
+                0.0, 2.0, directory.resolve("fragment.m4s"));
+
+        assertThat(command).containsSequence("-map", "0:a:1")
+                .containsSequence("-c:a", "aac", "-b:a", "192k");
+        assertThat(command).doesNotContain("copy");
+        assertThat(service.fragmentCommand(directory.resolve("source.mkv"), false, 0, false,
+                0.0, 2.0, directory.resolve("fragment.m4s"))).containsSequence("-c", "copy");
+    }
+
+    @Test
+    void convertsHi10VideoToEightBitH264() {
+        TestService service = new TestService();
+
+        List<String> command = service.fragmentCommand(directory.resolve("source.mkv"), true, 0, true,
+                10.928, 20.938, directory.resolve("fragment.m4s"));
+
+        assertThat(command).containsSequence("-c:v", "libx264", "-preset", "veryfast")
+                .containsSequence("-pix_fmt", "yuv420p");
+        assertThat(command).doesNotContain("copy");
+        assertThat(service.fragmentCommand(directory.resolve("source.mkv"), true, 0, true,
+                10.928, 20.938, directory.resolve("fragment.m4s"), true))
+                .containsSequence("-map_chapters", "-1");
+        assertThat(command).doesNotContain("-map_chapters");
+    }
+
+    @Test
+    void normalizesFragmentDecodeTimeInItsActualTimescale() throws Exception {
+        Path fragment = directory.resolve("fragment.m4s");
+        var output = new java.io.DataOutputStream(Files.newOutputStream(fragment));
+        output.writeInt(20);
+        output.writeBytes("tfdt");
+        output.writeByte(1);
+        output.writeByte(0);
+        output.writeShort(0);
+        output.writeLong(-23);
+        output.close();
+
+        OnDemandDashService.normalizeTfdt(fragment, 1.001, 48_000);
+
+        byte[] bytes = Files.readAllBytes(fragment);
+        int type = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1).indexOf("tfdt");
+        assertThat(type).isEqualTo(4);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 12, 8).getLong()).isEqualTo(48_048);
+        assertThat(bytes).hasSize(20);
+    }
+
+    @Test
+    void normalizesEveryFragmentWithTheSameDelta() throws Exception {
+        Path fragment = directory.resolve("multiple.m4s");
+        var output = new java.io.DataOutputStream(Files.newOutputStream(fragment));
+        for (long value : List.of(455_789L, 458_792L)) {
+            output.writeInt(20);
+            output.writeBytes("tfdt");
+            output.writeByte(1);
+            output.writeByte(0);
+            output.writeShort(0);
+            output.writeLong(value);
+        }
+        output.close();
+
+        OnDemandDashService.normalizeTfdt(fragment, 10.928, 1000);
+
+        byte[] bytes = Files.readAllBytes(fragment);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 12, 8).getLong()).isEqualTo(10_928);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 32, 8).getLong()).isEqualTo(13_931);
+    }
+
+    @Test
+    void stripsTrailingMediaFromLocalInit() throws Exception {
+        Path media = directory.resolve("frame.m4s");
+        Path init = directory.resolve("init.m4s");
+        var output = new java.io.DataOutputStream(Files.newOutputStream(media));
+        for (String[] box : List.of(new String[]{"ftyp", "isom"}, new String[]{"moov", "mvhd"},
+                new String[]{"moof", "mfhd"}, new String[]{"mdat", "timecode"})) {
+            byte[] payload = box[1].getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+            output.writeInt(8 + payload.length);
+            output.writeBytes(box[0]);
+            output.write(payload);
+        }
+        output.close();
+
+        OnDemandDashService.extractInit(media, init);
+
+        String result = Files.readString(init, java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertThat(result).contains("ftyp", "moov").doesNotContain("moof", "mdat", "timecode");
+        assertThat(init).hasSize(24);
     }
 
     @Test
@@ -83,6 +188,68 @@ class OnDemandDashServiceTest {
         assertThat(cache.resolve("gop-v-00001.m4s")).doesNotExist();
         assertThat(service.segment(source, cache, "video", "subtitle-0.vtt", null).exists()).isTrue();
         assertThat(cache.resolve("gop-v-00001.m4s")).doesNotExist();
+    }
+
+    @Test
+    void exposesMultipleAudioTracksAndMatchingExternalSubtitles() throws Exception {
+        List<Integer> initialized = new ArrayList<>();
+        List<Integer> fragmented = new ArrayList<>();
+        List<Path> converted = new ArrayList<>();
+        OnDemandDashService service = new OnDemandDashService(mock(PlaybackLogService.class), new ObjectMapper(),
+                "ffmpeg", "ffprobe") {
+            @Override
+            MediaIndex probe(Path source) {
+                StreamMetadata video = new StreamMetadata("h264", "High", 40, 640, 360, "25/1");
+                StreamMetadata english = new StreamMetadata("aac", "", -99, 0, 0, "", "en", "English");
+                StreamMetadata japanese = new StreamMetadata("aac", "", -99, 0, 0, "", "ja", "Japanese");
+                return new MediaIndex(List.of(0.0, 2.0), 3.0, video, english, 1000,
+                        List.of(new SubtitleMetadata("en", "Embedded", 0, null)), List.of(japanese));
+            }
+
+            @Override
+            void createInit(Path source, boolean video, int track, Path output) {
+                initialized.add(track);
+                write(output);
+            }
+
+            @Override
+            void createFragment(Path source, boolean video, int track, double start, double end, Path output) {
+                fragmented.add(track);
+                write(output);
+            }
+
+            @Override
+            void createExternalSubtitle(Path source, Path output) {
+                converted.add(source);
+                write(output);
+            }
+
+            private void write(Path output) {
+                try {
+                    Files.writeString(output, "media");
+                } catch (Exception error) {
+                    throw new AssertionError(error);
+                }
+            }
+        };
+        Path source = Files.writeString(directory.resolve("S01E01.mkv"), "source");
+        Path sidecar = Files.writeString(directory.resolve("S01E01.ass"), "ass");
+        Path cache = directory.resolve("cache");
+
+        service.prepare(source, cache, "local", null, List.of(sidecar));
+        String manifest = Files.readString(cache.resolve("ondemand.mpd"));
+
+        assertThat(manifest).contains("id=\"a0\"", "id=\"a1\"", "English", "Japanese",
+                "init-$RepresentationID$.m4s", "gop-$RepresentationID$-$Number%05d$.m4s",
+                "S01E01.ass", "subtitle-1.vtt");
+        assertThat(service.segment(source, cache, "local", "init-a1.m4s", null, List.of(sidecar)).exists()).isTrue();
+        assertThat(service.segment(source, cache, "local", "gop-a1-00001.m4s", null, List.of(sidecar)).exists()).isTrue();
+        assertThat(service.segment(source, cache, "local", "subtitle-1.vtt", null, List.of(sidecar)).exists()).isTrue();
+        assertThat(initialized).containsExactly(1);
+        assertThat(fragmented).containsExactly(1);
+        assertThat(converted).containsExactly(sidecar);
+        javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new java.io.ByteArrayInputStream(manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
 
     private static class TestService extends OnDemandDashService {

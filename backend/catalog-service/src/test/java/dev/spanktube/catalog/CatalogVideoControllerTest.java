@@ -49,4 +49,24 @@ class CatalogVideoControllerTest {
         assertThat(response.get("sponsorBlock")).isEqualTo(List.of());
         assertThat(response.get("dislikeCountEstimate")).isEqualTo(42L);
     }
+
+    @Test
+    void returnsVideoWhenDislikesAreUnavailable() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        SponsorBlockClient sponsorBlock = mock(SponsorBlockClient.class);
+        RydClient ryd = mock(RydClient.class);
+        Map<String, Object> video = new HashMap<>();
+        video.put("videoId", "video");
+        when(upstream.video("video", null)).thenReturn(video);
+        when(sponsorBlock.segments("video")).thenReturn(List.of());
+        when(ryd.dislikes("video")).thenReturn(null);
+        CatalogVideoController controller = new CatalogVideoController(upstream, sponsorBlock, ryd);
+
+        Map<String, Object> response = controller.video("video", null).block();
+
+        assertThat(response).isNotNull();
+        assertThat(response.get("videoId")).isEqualTo("video");
+        assertThat(response.get("sponsorBlock")).isEqualTo(List.of());
+        assertThat(response).doesNotContainKey("dislikeCountEstimate");
+    }
 }

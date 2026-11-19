@@ -132,6 +132,7 @@ export type UserSettings = {
   hideTechnicalDetails: boolean;
   preferBestQuality: boolean;
   theme: "light" | "dark" | "system";
+  localFilesAccess: boolean;
 };
 
 export type LibraryItem = {

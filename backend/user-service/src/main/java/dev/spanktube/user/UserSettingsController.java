@@ -16,9 +16,11 @@ import org.springframework.web.server.ResponseStatusException;
 class UserSettingsController {
 
     private final JdbcTemplate jdbc;
+    private final LocalFileAccessService localFileAccess;
 
-    UserSettingsController(JdbcTemplate jdbc) {
+    UserSettingsController(JdbcTemplate jdbc, LocalFileAccessService localFileAccess) {
         this.jdbc = jdbc;
+        this.localFileAccess = localFileAccess;
     }
 
     @GetMapping("/api/v1/users/me/settings")
@@ -69,16 +71,17 @@ class UserSettingsController {
     }
 
     private Settings current(String username) {
+        boolean filesAccess = localFileAccess.access(username).enabled();
         return jdbc.query("select auto_archive, autoplay, hide_technical_details, prefer_best_quality, theme "
                         + "from user_settings where username = ?",
                 rs -> rs.next() ? new Settings(rs.getBoolean("auto_archive"), rs.getBoolean("autoplay"),
                         rs.getBoolean("hide_technical_details"), rs.getBoolean("prefer_best_quality"),
-                        rs.getString("theme"))
-                        : new Settings(true, true, false, true, "system"), username);
+                        rs.getString("theme"), filesAccess)
+                        : new Settings(true, true, false, true, "system", filesAccess), username);
     }
 
     record Settings(boolean autoArchive, boolean autoplay, boolean hideTechnicalDetails, boolean preferBestQuality,
-            String theme) {
+            String theme, boolean localFilesAccess) {
     }
 
     record SettingsPatch(Boolean autoArchive, Boolean autoplay, Boolean hideTechnicalDetails,

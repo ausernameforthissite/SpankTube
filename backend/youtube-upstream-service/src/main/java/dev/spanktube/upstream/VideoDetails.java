@@ -35,6 +35,12 @@ public record VideoDetails(
                 subtitles, chapters, madeForKids, "VIDEO_STREAM", null, null);
     }
 
+    public VideoDetails withFormats(java.util.List<StreamFormat> formats) {
+        return new VideoDetails(videoId, title, description, channelId, channelName, channelHandle, channelCustomPath,
+                channelAvatarUrl, channelSubscriberCount, durationSeconds, viewCount, likeCount, publishedAt, thumbnailUrl,
+                formats, subtitles, chapters, madeForKids, streamType, liveDashUrl, liveHlsUrl);
+    }
+
     @Override
     public String streamType() {
         return streamType == null ? "VIDEO_STREAM" : streamType;

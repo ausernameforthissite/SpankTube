@@ -14,6 +14,7 @@ alter table user_settings add column if not exists theme text not null default '
 alter table user_settings add column if not exists avatar bytea;
 alter table user_settings add column if not exists avatar_content_type text;
 alter table user_settings add column if not exists auto_archive boolean not null default true;
+alter table user_settings add column if not exists local_files_access boolean not null default false;
 
 create table if not exists local_users (
     username text primary key,
@@ -29,3 +30,6 @@ create table if not exists invite_tokens (
     used_by text,
     used_at timestamptz
 );
+
+alter table invite_tokens add column if not exists kind text not null default 'REGISTRATION';
+alter table invite_tokens add column if not exists target_username text;

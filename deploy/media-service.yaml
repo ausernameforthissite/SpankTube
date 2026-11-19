@@ -31,11 +31,18 @@ spec:
               value: http://youtube-upstream-service:8081
             - name: CATALOG_SERVICE_URL
               value: http://catalog-service:8084
+            - name: USER_SERVICE_URL
+              value: http://user-service:8083
             - name: ARCHIVE_ROOT
               value: /archive
+            - name: LOCAL_FILES_ROOT
+              value: /mnt/tank/data/torrents/finished
           volumeMounts:
             - name: archive
               mountPath: /archive
+              readOnly: true
+            - name: local-files
+              mountPath: /mnt/tank/data/torrents/finished
               readOnly: true
             - name: playback-cache
               mountPath: /tmp/spanktube-playback
@@ -65,6 +72,10 @@ spec:
         - name: archive
           persistentVolumeClaim:
             claimName: archive
+            readOnly: true
+        - name: local-files
+          persistentVolumeClaim:
+            claimName: local-files
             readOnly: true
         - name: playback-cache
           emptyDir:

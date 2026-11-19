@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spanktube-local-files
+spec:
+  capacity:
+    storage: 17Ti
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions: ["ro"]
+  nfs:
+    server: 192.168.88.239
+    path: /mnt/tank/data/torrents/finished
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-files
+  namespace: spanktube
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  volumeName: spanktube-local-files
+  resources:
+    requests:
+      storage: 17Ti

@@ -30,7 +30,7 @@ class GatewaySecurityConfiguration {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/register",
-                                "/actuator/health").permitAll()
+                                "/api/v1/auth/password-reset", "/actuator/health").permitAll()
                         .pathMatchers(org.springframework.http.HttpMethod.GET,
                                 "/media/v/*/thumbnail", "/media/channel/*/avatar", "/media/playlist/*/thumbnail",
                                 "/media/playlist/*/archive-thumbnail", "/media/image").permitAll()

@@ -6,6 +6,7 @@ import { animalAvatar } from "./animalAvatar";
 import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
+import { FileBrowser } from "./FileBrowser";
 import { LibraryView } from "./LibraryView";
 import { LazyThumbnail } from "./LazyThumbnail";
 import { Pagination } from "./Pagination";
@@ -14,6 +15,7 @@ import { PlaybackLog } from "./PlaybackLog";
 import { CardContextMenu, PlaylistCreateDialog, PlaylistPicker } from "./PlaylistMenus";
 import { QueuePanel } from "./QueuePanel";
 import { SettingsMenu } from "./SettingsMenu";
+import { SubtitleDisplayer } from "./SubtitleDisplayer";
 import { UserMenu } from "./UserMenu";
 import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
@@ -61,15 +63,6 @@ type SearchItem = {
 type SearchResults = { items: SearchItem[]; nextCursor: string | null };
 type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
 
-class SubtitleDisplayer extends shaka.text.UITextDisplayer {
-  append(cues: shaka.text.Cue[]) {
-    for (const cue of cues) {
-      if (/<\/?[a-z][^>]*>/i.test(cue.payload)) shaka.text.Cue.parseCuePayload(cue);
-    }
-    super.append(cues);
-  }
-}
-
 type ChannelPage = Channel & { videos: SearchItem[]; playlists: SearchItem[] };
 type Playlist = {
   playlistId: string;
@@ -88,6 +81,7 @@ type UserQuota = {
   usedBytes: number;
   effectiveQuotaBytes: number;
   lruThresholdPercent: number;
+  localFilesAccess: boolean;
 };
 type Popup = "queue" | "download" | "settings" | "history" | "playbackLog" | "user" | "cardMenu" | "playlistPicker" | "playlistCreate" | "archiveEstimate" | null;
 
@@ -265,6 +259,17 @@ function readLocation() {
   return { path: window.location.pathname, query: new URLSearchParams(window.location.search) };
 }
 
+function fileRoutePath(pathname: string): string | null {
+  if (pathname === "/files") return "";
+  if (!pathname.startsWith("/files/")) return null;
+  const encoded = pathname.substring("/files/".length);
+  try {
+    return encoded.split("/").map(segment => decodeURIComponent(segment)).join("/");
+  } catch {
+    return encoded;
+  }
+}
+
 function auxiliaryNavigation(event: ReactMouseEvent<HTMLElement>) {
   if (event.button !== 1) return;
   const target = event.target as HTMLElement;
@@ -282,6 +287,7 @@ export default function App() {
   const [username, setUsername] = useState("viewer");
   const [password, setPassword] = useState("");
   const [registration, setRegistration] = useState(false);
+  const [passwordReset, setPasswordReset] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [location, setLocation] = useState(readLocation);
   const [searchQuery, setSearchQuery] = useState("");
@@ -290,6 +296,7 @@ export default function App() {
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
   const [avatarVersion, setAvatarVersion] = useState(0);
   const [invite, setInvite] = useState<{ code: string; expiresAt: string; usedBy: string | null } | null>(null);
+  const [resetInvite, setResetInvite] = useState<{ code: string; expiresAt: string; username: string } | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
   const [archiveFile, setArchiveFile] = useState<{ downloadUrl: string; filename: string } | null>(null);
   const [archiveChecked, setArchiveChecked] = useState(false);
@@ -326,7 +333,7 @@ export default function App() {
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<UserSettings>({ autoArchive: true, autoplay: true,
-    hideTechnicalDetails: false, preferBestQuality: true, theme: "system" });
+    hideTechnicalDetails: false, preferBestQuality: true, theme: "system", localFilesAccess: false });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
   const watchProgressRef = useRef(watchProgress);
@@ -349,6 +356,7 @@ export default function App() {
   const requestedStart = watchId ? parseTimecode(location.query.get("t")) : null;
   const currentPage = pageNumber(location.query.get("page"));
   const libraryScope = location.path === "/library" ? location.query.get("scope") || "own" : "own";
+  const localFilesPath = fileRoutePath(location.path);
   const metadataSupported = Boolean(watchId) || location.path === "/playlist"
     || location.path.startsWith("/channel/") || location.path.startsWith("/c/") || location.path.startsWith("/@");
   const metadataKey = watchId ? `video:${watchId}` : location.path === "/playlist"
@@ -747,6 +755,40 @@ export default function App() {
     }
   };
 
+  const generatePasswordResetInvite = async (name: string) => {
+    setError(null);
+    try {
+      const response = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(name)}/password-reset-invite`, { method: "POST" });
+      const generated = await response.json() as { code: string; expiresAt: string; username: string };
+      setResetInvite(generated);
+      let copied = false;
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(generated.code);
+          copied = true;
+        } catch {
+        }
+      }
+      if (!copied) {
+        const field = document.createElement("textarea");
+        field.value = generated.code;
+        field.readOnly = true;
+        field.style.cssText = "position:fixed;left:-10000px;opacity:0";
+        document.body.appendChild(field);
+        field.select();
+        try {
+          copied = document.execCommand("copy");
+        } catch {
+        }
+        field.remove();
+      }
+      if (copied) notify("Токен сброса пароля скопирован в буфер обмена. Срок действия — 1 час.");
+      else window.prompt("Токен сброса пароля действует 1 час. Скопируйте его:", generated.code);
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
   const togglePopup = useCallback((name: Exclude<Popup, null>, anchor: HTMLElement) => {
     popupAnchorRef.current = anchor;
     setPopup(current => current === name ? null : name);
@@ -1131,6 +1173,19 @@ export default function App() {
     event.preventDefault();
     setError(null);
     try {
+      if (passwordReset) {
+        const response = await fetch(`${API_BASE_URL}/api/v1/auth/password-reset`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invite: inviteCode, password }),
+        });
+        if (!response.ok) throw await responseError(response);
+        setPasswordReset(false);
+        setInviteCode("");
+        setPassword("");
+        notify("Пароль изменён. Теперь войдите с новым паролем.");
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/${registration ? "register" : "login"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1688,25 +1743,42 @@ export default function App() {
     }
   };
 
+  const updateLocalFilesAccess = async (name: string, enabled: boolean) => {
+    try {
+      await apiFetch(`/api/v1/admin/users/${name}/local-files-access`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      await loadUsers();
+    } catch (reason) {
+      showError(reason);
+    }
+  };
+
   const number = new Intl.NumberFormat("ru-RU");
 
   if (!session) {
     return (
       <main onAuxClickCapture={auxiliaryNavigation}>
-        <header><h1>SpankTube</h1><p>{registration ? "Регистрация по инвайту" : "Вход в личный прокси YouTube"}</p></header>
+        <header><h1>SpankTube</h1><p>{passwordReset ? "Восстановление пароля" : registration ? "Регистрация по инвайту" : "Вход в личный прокси YouTube"}</p></header>
         <section className="panel auth">
           <form onSubmit={login}>
-            {registration && <input value={inviteCode} onChange={event => setInviteCode(event.target.value.trim())}
-              placeholder="Код приглашения" aria-label="Код приглашения" required />}
-            <input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" aria-label="Логин" aria-describedby={registration ? "username-requirements" : undefined} required />
+            {(registration || passwordReset) && <input value={inviteCode} onChange={event => setInviteCode(event.target.value.trim())}
+              placeholder="Код приглашения" aria-label="Код приглашения" autoComplete="one-time-code" required />}
+            {!passwordReset && <input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" aria-label="Логин" aria-describedby={registration ? "username-requirements" : undefined} required />}
             {registration && <small id="username-requirements" className="muted auth-field-hint">Имя пользователя — от 3 до 32 символов; латинские буквы, цифры, точка, дефис и подчёркивание.</small>}
-            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={registration ? "new-password" : "current-password"} placeholder="Пароль" aria-label="Пароль" aria-describedby={registration ? "password-requirements" : undefined} required />
-            {registration && <small id="password-requirements" className="muted auth-field-hint">Длина пароля — от 8 до 128 символов.</small>}
-            <button type="submit">{registration ? "Зарегистрироваться" : "Войти"}</button>
+            <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={registration || passwordReset ? "new-password" : "current-password"} placeholder={passwordReset ? "Новый пароль" : "Пароль"} aria-label={passwordReset ? "Новый пароль" : "Пароль"} aria-describedby={registration || passwordReset ? "password-requirements" : undefined} required />
+            {(registration || passwordReset) && <small id="password-requirements" className="muted auth-field-hint">Длина пароля — от 8 до 128 символов.</small>}
+            <button type="submit">{passwordReset ? "Изменить пароль" : registration ? "Зарегистрироваться" : "Войти"}</button>
           </form>
-          <button className="link" onClick={() => { setRegistration(current => !current); setError(null); }}>
-            {registration ? "Вернуться ко входу" : "Регистрация по инвайту"}
-          </button>
+          <div className="auth-links">
+            <button className="link" onClick={() => { setRegistration(current => !current); setPasswordReset(false); setError(null); }}>
+              {registration || passwordReset ? "Вернуться ко входу" : "Регистрация по инвайту"}
+            </button>
+            {!registration && !passwordReset && <button className="link" onClick={() => { setPasswordReset(true); setError(null); }}>
+              Забыли пароль?
+            </button>}
+          </div>
         </section>
         {error && <section className="error" role="alert"><strong>{error}</strong></section>}
       </main>
@@ -1958,13 +2030,31 @@ export default function App() {
 
       {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={navigate} />}
 
+      {localFilesPath !== null && (session.role === "ADMIN" || settings.localFilesAccess
+        ? <FileBrowser apiFetch={apiFetch} ensureAccessToken={ensureAccessToken} settings={settings}
+          settingsLoaded={settingsLoaded} routePath={localFilesPath} onNavigate={navigate}
+          onSettingsChange={patch => void updateSettings(patch)} onError={showError} />
+        : <section className="panel metadata"><h2>Видеофайлы</h2><p>Доступ к NFS-каталогу не включён для этого пользователя.</p></section>)}
+
       {location.path === "/admin" && users && (
         <section className="panel metadata">
-          <h2>Квоты пользователей</h2>
+          <h2>Пользователи и квоты</h2>
           {users.map(user => (
-            <div className="library-row" key={user.username}>
-              <div><strong>{user.username}</strong><div className="muted">{formatGB(user.usedBytes)} / {formatGB(user.effectiveQuotaBytes)}</div></div>
-              <div className="row-actions"><input className="quota-input" type="number" min="1" value={quotaDrafts[user.username] || ""} onChange={event => setQuotaDrafts({ ...quotaDrafts, [user.username]: event.target.value })} /><span>ГиБ</span><button className="secondary" onClick={() => updateQuota(user.username)}>Сохранить</button></div>
+            <div className="library-row admin-user-row" key={user.username}>
+              <div><strong>{user.username}</strong><div className="muted">{user.role} · {formatGB(user.usedBytes)} / {formatGB(user.effectiveQuotaBytes)}</div></div>
+              <label className="switch-row file-access-toggle"
+                title={user.role === "ADMIN" ? "Администраторы всегда имеют доступ" : "Разрешить просмотр видеофайлов на NFS"}>
+                <span>Файлы NFS</span><input type="checkbox" role="switch" checked={user.localFilesAccess}
+                  disabled={user.role === "ADMIN"} aria-label={`Доступ ${user.username} к файлам NFS`}
+                  onChange={event => void updateLocalFilesAccess(user.username, event.target.checked)} />
+              </label>
+              <div className="row-actions">
+                <input className="quota-input" type="number" min="1" value={quotaDrafts[user.username] || ""} onChange={event => setQuotaDrafts({ ...quotaDrafts, [user.username]: event.target.value })} /><span>ГиБ</span><button className="secondary" onClick={() => updateQuota(user.username)}>Сохранить</button>
+                <button className="secondary" aria-label={`Сброс пароля ${user.username}`} onClick={() => void generatePasswordResetInvite(user.username)}>Сброс пароля</button>
+              </div>
+              {resetInvite?.username === user.username && <div className="password-reset-invite">
+                <span className="muted">Код действует до {new Date(resetInvite.expiresAt).toLocaleString()}</span><code>{resetInvite.code}</code>
+              </div>}
             </div>
           ))}
         </section>

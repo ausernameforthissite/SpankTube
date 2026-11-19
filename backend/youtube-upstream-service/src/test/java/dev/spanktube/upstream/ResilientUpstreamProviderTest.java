@@ -120,6 +120,29 @@ class ResilientUpstreamProviderTest {
                         error -> assertThat(error.getMessage()).contains("HTML instead of JSON"));
     }
 
+    @Test
+    void normalizesAudioTrackIdsAcrossProviders() {
+        when(primary.video("P-4sKXjy8xI")).thenThrow(UpstreamException.failed("TLS handshake"))
+                .thenReturn(videoWithTrack("140-1", "140-1", "ru", "newpipe"));
+        when(fallback.video("P-4sKXjy8xI")).thenReturn(videoWithTrack("140-ru.4", "140-ru.4", "ru", "yt-dlp"));
+
+        VideoDetails fromFallback = provider.video("P-4sKXjy8xI");
+        VideoDetails fromPrimary = provider.video("P-4sKXjy8xI");
+
+        assertThat(fromFallback.formats().getFirst().trackId()).isEqualTo("140-ru-original");
+        assertThat(fromPrimary.formats().getFirst().trackId()).isEqualTo("140-ru-original");
+        assertThat(fromFallback.formats().getFirst().url()).contains("yt-dlp");
+        assertThat(fromPrimary.formats().getFirst().url()).contains("newpipe");
+    }
+
+    private static VideoDetails videoWithTrack(String formatId, String trackId, String language, String provider) {
+        StreamFormat format = new StreamFormat(formatId, "https://" + provider + ".example/video", "audio/mp4",
+                "mp4a.40.2", null, null, null, 128000L, 44100, 100000L, false, true, null, null,
+                trackId, language, "Original", true, false);
+        return new VideoDetails("P-4sKXjy8xI", "Video", null, "channel", "Channel", null, null, null, null,
+                100L, null, null, null, null, java.util.List.of(format), java.util.List.of(), java.util.List.of(), false);
+    }
+
     private static SearchResults results(int count, String nextCursor) {
         return new SearchResults(Collections.nCopies(count, mock(SearchItem.class)), nextCursor);
     }

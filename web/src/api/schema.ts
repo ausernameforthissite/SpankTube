@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resetStage2Password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -756,6 +772,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{username}/password-reset-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createStage2PasswordResetInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{username}/quota": {
         parameters: {
             query?: never;
@@ -767,6 +799,86 @@ export interface paths {
         put: operations["setStage2UserQuota"];
         post?: never;
         delete: operations["resetStage2UserQuota"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalFileEntry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/files/{fileId}/manifest.mpd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalFileManifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/files/{fileId}/segments/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalFileSegment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{username}/local-files-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setLocalFilesAccess"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -800,6 +912,11 @@ export interface components {
         RegistrationRequest: {
             invite: string;
             username: string;
+            /** Format: password */
+            password: string;
+        };
+        PasswordResetRequest: {
+            invite: string;
             /** Format: password */
             password: string;
         };
@@ -1119,6 +1236,12 @@ export interface components {
             expiresAt: string;
             usedBy?: string | null;
         };
+        PasswordResetInvite: {
+            code: string;
+            /** Format: date-time */
+            expiresAt: string;
+            username: string;
+        };
         UserSettings: {
             /** @default true */
             autoArchive: boolean;
@@ -1133,6 +1256,11 @@ export interface components {
              * @enum {string}
              */
             theme: "system" | "light" | "dark";
+            /**
+             * @description Read-only local NFS browser access; always true for administrators
+             * @default false
+             */
+            localFilesAccess: boolean;
         };
         SettingsPatch: {
             autoArchive?: boolean;
@@ -1318,6 +1446,31 @@ export interface components {
             effectiveQuotaBytes: number;
             /** @enum {integer} */
             lruThresholdPercent: 90;
+            localFilesAccess: boolean;
+        };
+        LocalFileAccessUpdate: {
+            enabled: boolean;
+        };
+        LocalFileAccess: {
+            username: string;
+            enabled: boolean;
+        };
+        LocalDirectory: {
+            path: string;
+            parentPath: string | null;
+            entries: components["schemas"]["LocalFileEntry"][];
+        };
+        LocalFileEntry: {
+            /** @description Opaque base64url relative-path ID */
+            id: string;
+            name: string;
+            /** @description Path relative to the configured NFS root */
+            path: string;
+            /** @enum {string} */
+            kind: "DIRECTORY" | "VIDEO";
+            /** Format: int64 */
+            sizeBytes: number | null;
+            manifestUrl: string | null;
         };
         QuotaUpdate: {
             /**
@@ -1419,6 +1572,32 @@ export interface operations {
                     "application/json": components["schemas"]["TokenPair"];
                 };
             };
+            410: components["responses"]["Error"];
+        };
+    };
+    resetStage2Password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Password updated; existing refresh sessions revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
         };
     };
     refresh: {
@@ -2676,6 +2855,30 @@ export interface operations {
             };
         };
     };
+    createStage2PasswordResetInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: components["parameters"]["Username"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Single-use password reset invite valid for one hour */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetInvite"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     getStage2UserQuota: {
         parameters: {
             query?: never;
@@ -2742,6 +2945,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EffectiveQuota"];
+                };
+            };
+        };
+    };
+    getLocalFileEntry: {
+        parameters: {
+            query?: {
+                /** @description File or directory path relative to the NFS root, used by direct /files/* links */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved file or directory; requires an administrator or an explicit user grant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalFileEntry"];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    getLocalFiles: {
+        parameters: {
+            query?: {
+                /** @description Directory path relative to the configured NFS root */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Direct child directories and MKV/MP4 videos; requires an administrator or an explicit user grant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalDirectory"];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    getLocalFileManifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DASH manifest with all embedded audio/subtitles and same-name sidecar subtitles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/dash+xml": string;
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    getLocalFileSegment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fileId: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lazily generated fMP4 segment or WebVTT subtitle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                    "text/vtt": string;
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    setLocalFilesAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: components["parameters"]["Username"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalFileAccessUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated grant; administrators remain enabled implicitly */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalFileAccess"];
                 };
             };
         };

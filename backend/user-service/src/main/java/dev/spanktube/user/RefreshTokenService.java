@@ -43,6 +43,10 @@ class RefreshTokenService {
         return session.username();
     }
 
+    void revokeUser(String username) {
+        sessions.entrySet().removeIf(entry -> entry.getValue().username().equals(username));
+    }
+
     private static String hash(String token) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")

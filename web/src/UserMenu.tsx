@@ -25,6 +25,10 @@ export function UserMenu({ username, role, avatarUrl, settings, onChange, onNavi
         event.preventDefault();
         onNavigate("/library");
       }}>Библиотека</a>
+      {(role === "ADMIN" || settings.localFilesAccess) && <a className="link" href="/files" onClick={event => {
+        event.preventDefault();
+        onNavigate("/files");
+      }}>Видеофайлы</a>}
       <button className="link" onClick={() => onNavigate("/settings")}>Настройки</button>
       {role === "ADMIN" && <button className="link" data-nav-url="/admin" onClick={() => onNavigate("/admin")}>Квоты</button>}
       <label className="switch-row"><span>Тема</span>

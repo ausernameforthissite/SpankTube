@@ -1,6 +1,7 @@
 package dev.spanktube.catalog;
 
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,15 +29,13 @@ class CatalogVideoController {
                 .subscribeOn(Schedulers.boundedElastic());
         Mono<java.util.List<SponsorBlockClient.Segment>> segments = Mono.fromCallable(() -> sponsorBlockClient.segments(videoId))
                 .subscribeOn(Schedulers.boundedElastic());
-        Mono<Long> dislikes = Mono.fromCallable(() -> rydClient.dislikes(videoId))
+        Mono<Optional<Long>> dislikes = Mono.fromCallable(() -> Optional.ofNullable(rydClient.dislikes(videoId)))
                 .subscribeOn(Schedulers.boundedElastic());
         return Mono.zip(video, segments, dislikes)
                 .map(result -> {
                     Map<String, Object> response = result.getT1();
                     response.put("sponsorBlock", result.getT2());
-                    if (result.getT3() != null) {
-                        response.put("dislikeCountEstimate", result.getT3());
-                    }
+                    result.getT3().ifPresent(count -> response.put("dislikeCountEstimate", count));
                     return response;
                 });
     }

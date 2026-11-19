@@ -145,7 +145,7 @@ export function PlayerControls({ video, player, position, sponsorSegments, autop
         || (left.label || left.language).localeCompare(right.label || right.language));
       setSubtitleTracks(texts);
       const activeText = texts.find(track => track.active);
-      const showing = Array.from(video.textTracks).some(track => track.mode === "showing");
+      const showing = player.isTextTrackVisible();
       setSelectedSubtitle(showing && activeText ? String(activeText.id) : "off");
       const unique = new Map<number, QualityTrack>();
       for (const track of player.getVariantTracks()) {

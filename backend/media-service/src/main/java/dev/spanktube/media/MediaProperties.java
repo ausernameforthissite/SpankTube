@@ -5,7 +5,7 @@ import java.net.URI;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("spanktube.media")
-public record MediaProperties(URI upstreamUrl, URI catalogUrl) {
+public record MediaProperties(URI upstreamUrl, URI catalogUrl, URI userServiceUrl) {
 
     public MediaProperties {
         if (upstreamUrl == null) {
@@ -13,6 +13,9 @@ public record MediaProperties(URI upstreamUrl, URI catalogUrl) {
         }
         if (catalogUrl == null) {
             catalogUrl = URI.create("http://localhost:8084");
+        }
+        if (userServiceUrl == null) {
+            userServiceUrl = URI.create("http://localhost:8083");
         }
     }
 }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SpankTube Stage 2 API
-  version: 0.3.0
+  version: 0.4.0
 paths:
   /api/v1/auth/login:
     post:
@@ -33,6 +33,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
+        '410': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/password-reset:
+    post:
+      operationId: resetStage2Password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetRequest' }
+      responses:
+        '204': { description: Password updated; existing refresh sessions revoked }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
   /api/v1/auth/refresh:
     post:
       operationId: refresh
@@ -748,6 +763,18 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/UserQuota' }
+  /api/v1/admin/users/{username}/password-reset-invite:
+    post:
+      operationId: createStage2PasswordResetInvite
+      parameters: [{ $ref: '#/components/parameters/Username' }]
+      responses:
+        '200':
+          description: Single-use password reset invite valid for one hour
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasswordResetInvite' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/admin/users/{username}/quota:
     get:
       operationId: getStage2UserQuota
@@ -781,6 +808,91 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EffectiveQuota' }
+  /api/v1/files/entry:
+    get:
+      operationId: getLocalFileEntry
+      parameters:
+        - name: path
+          in: query
+          schema: { type: string, default: '' }
+          description: File or directory path relative to the NFS root, used by direct /files/* links
+      responses:
+        '200':
+          description: Resolved file or directory; requires an administrator or an explicit user grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalFileEntry' }
+        '403':
+          $ref: '#/components/responses/Error'
+  /api/v1/files:
+    get:
+      operationId: getLocalFiles
+      parameters:
+        - name: path
+          in: query
+          schema: { type: string, default: '' }
+          description: Directory path relative to the configured NFS root
+      responses:
+        '200':
+          description: Direct child directories and MKV/MP4 videos; requires an administrator or an explicit user grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalDirectory' }
+        '403':
+          $ref: '#/components/responses/Error'
+  /media/files/{fileId}/manifest.mpd:
+    get:
+      operationId: getLocalFileManifest
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string, description: Opaque base64url ID returned by the file browser }
+      responses:
+        '200':
+          description: DASH manifest with all embedded audio/subtitles and same-name sidecar subtitles
+          content:
+            application/dash+xml:
+              schema: { type: string }
+        '403':
+          $ref: '#/components/responses/Error'
+  /media/files/{fileId}/segments/{filename}:
+    get:
+      operationId: getLocalFileSegment
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: filename
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' }
+      responses:
+        '200':
+          description: Lazily generated fMP4 segment or WebVTT subtitle
+          content:
+            video/mp4:
+              schema: { type: string, format: binary }
+            text/vtt:
+              schema: { type: string }
+        '403':
+          $ref: '#/components/responses/Error'
+  /api/v1/admin/users/{username}/local-files-access:
+    put:
+      operationId: setLocalFilesAccess
+      parameters: [{ $ref: '#/components/parameters/Username' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalFileAccessUpdate' }
+      responses:
+        '200':
+          description: Updated grant; administrators remain enabled implicitly
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalFileAccess' }
   /api/v1/admin/storage:
     get:
       operationId: getStage2Storage
@@ -836,6 +948,12 @@ components:
       properties:
         invite: { type: string }
         username: { type: string, minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9_.-]+$' }
+        password: { type: string, format: password, minLength: 8, maxLength: 128 }
+    PasswordResetRequest:
+      type: object
+      required: [invite, password]
+      properties:
+        invite: { type: string }
         password: { type: string, format: password, minLength: 8, maxLength: 128 }
     RefreshRequest:
       type: object
@@ -1145,15 +1263,23 @@ components:
         code: { type: string }
         expiresAt: { type: string, format: date-time }
         usedBy: { type: [string, 'null'] }
+    PasswordResetInvite:
+      type: object
+      required: [code, expiresAt, username]
+      properties:
+        code: { type: string }
+        expiresAt: { type: string, format: date-time }
+        username: { type: string }
     UserSettings:
       type: object
-      required: [autoArchive, autoplay, hideTechnicalDetails, preferBestQuality, theme]
+      required: [autoArchive, autoplay, hideTechnicalDetails, preferBestQuality, theme, localFilesAccess]
       properties:
         autoArchive: { type: boolean, default: true }
         autoplay: { type: boolean, default: true }
         hideTechnicalDetails: { type: boolean, default: false }
         preferBestQuality: { type: boolean, default: true }
         theme: { type: string, enum: [system, light, dark], default: system }
+        localFilesAccess: { type: boolean, default: false, description: Read-only local NFS browser access; always true for administrators }
     SettingsPatch:
       type: object
       minProperties: 1
@@ -1285,7 +1411,7 @@ components:
         lruThresholdPercent: { type: integer, enum: [90] }
     UserQuota:
       type: object
-      required: [username, role, quotaBytes, usedBytes, effectiveQuotaBytes, lruThresholdPercent]
+      required: [username, role, quotaBytes, usedBytes, effectiveQuotaBytes, lruThresholdPercent, localFilesAccess]
       properties:
         username: { type: string }
         role: { type: string, enum: [VIEWER, ADMIN] }
@@ -1293,6 +1419,37 @@ components:
         usedBytes: { type: integer, format: int64 }
         effectiveQuotaBytes: { type: integer, format: int64 }
         lruThresholdPercent: { type: integer, enum: [90] }
+        localFilesAccess: { type: boolean }
+    LocalFileAccessUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    LocalFileAccess:
+      type: object
+      required: [username, enabled]
+      properties:
+        username: { type: string }
+        enabled: { type: boolean }
+    LocalDirectory:
+      type: object
+      required: [path, parentPath, entries]
+      properties:
+        path: { type: string }
+        parentPath: { type: [string, 'null'] }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/LocalFileEntry' }
+    LocalFileEntry:
+      type: object
+      required: [id, name, path, kind, sizeBytes, manifestUrl]
+      properties:
+        id: { type: string, description: Opaque base64url relative-path ID }
+        name: { type: string }
+        path: { type: string, description: Path relative to the configured NFS root }
+        kind: { type: string, enum: [DIRECTORY, VIDEO] }
+        sizeBytes: { type: [integer, 'null'], format: int64 }
+        manifestUrl: { type: [string, 'null'] }
     QuotaUpdate:
       type: object
       properties:

@@ -38,4 +38,23 @@ class GatewayRoutesTest {
                             .doesNotContainKey(RouteMetadataUtils.RESPONSE_TIMEOUT_ATTR));
         }
     }
+
+    @Test
+    void localFileBrowserUsesMediaService() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(GatewayProperties.class, () -> new GatewayProperties(
+                    null, null, null, null, null, null, null));
+            context.registerBean(RouteLocatorBuilder.class, () -> new RouteLocatorBuilder(context));
+            context.register(WebFluxProperties.class);
+            context.register(PathRoutePredicateFactory.class);
+            context.register(GatewayRoutes.class);
+            context.refresh();
+            List<Route> routes = context.getBean(RouteLocator.class).getRoutes().collectList().block();
+
+            assertThat(routes).isNotNull();
+            assertThat(routes).filteredOn(route -> route.getId().equals("local-files"))
+                    .singleElement()
+                    .satisfies(route -> assertThat(route.getUri().toString()).isEqualTo("http://localhost:8082"));
+        }
+    }
 }

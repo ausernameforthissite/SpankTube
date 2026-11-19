@@ -42,6 +42,8 @@ class GatewayRoutes {
                 .route("upstream-search", route -> route.path("/api/v1/search", "/api/v1/channels/**",
                         "/api/v1/playlists/**", "/api/v1/metadata/logs")
                         .uri(properties.upstreamServiceUrl()))
+                .route("local-files", route -> route.path("/api/v1/files", "/api/v1/files/**")
+                        .uri(properties.mediaServiceUrl()))
                 .route("media-service", route -> route.path("/media/**")
                         .uri(properties.mediaServiceUrl()))
                 .build();

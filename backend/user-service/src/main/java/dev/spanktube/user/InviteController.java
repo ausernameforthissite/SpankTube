@@ -5,7 +5,9 @@ import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,6 +38,21 @@ class InviteController {
         return invites.register(request.invite(), request.username(), request.password());
     }
 
+    @PostMapping("/api/v1/admin/users/{username}/password-reset-invite")
+    @PreAuthorize("hasRole('ADMIN')")
+    InviteService.PasswordResetInvite createPasswordReset(@AuthenticationPrincipal Jwt jwt, @PathVariable String username) {
+        return invites.createPasswordReset(jwt.getSubject(), username);
+    }
+
+    @PostMapping("/api/v1/auth/password-reset")
+    ResponseEntity<Void> resetPassword(@RequestBody PasswordResetRequest request) {
+        invites.resetPassword(request.invite(), request.password());
+        return ResponseEntity.noContent().build();
+    }
+
     record RegistrationRequest(String invite, String username, String password) {
+    }
+
+    record PasswordResetRequest(String invite, String password) {
     }
 }
