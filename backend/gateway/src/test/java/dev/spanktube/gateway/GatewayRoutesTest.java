@@ -36,6 +36,10 @@ class GatewayRoutesTest {
                     .singleElement()
                     .satisfies(route -> assertThat(route.getMetadata())
                             .doesNotContainKey(RouteMetadataUtils.RESPONSE_TIMEOUT_ATTR));
+            assertThat(routes).filteredOn(route -> route.getId().equals("feedback-events"))
+                    .singleElement()
+                    .satisfies(route -> assertThat(route.getMetadata())
+                            .containsEntry(RouteMetadataUtils.RESPONSE_TIMEOUT_ATTR, -1));
         }
     }
 

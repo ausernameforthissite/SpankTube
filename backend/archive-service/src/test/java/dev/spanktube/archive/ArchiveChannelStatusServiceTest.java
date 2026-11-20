@@ -36,7 +36,7 @@ class ArchiveChannelStatusServiceTest {
         when(catalog.existing("viewer", "recorded")).thenReturn(Optional.empty());
         when(catalog.archivedPlaylistIds("viewer", "channel")).thenReturn(List.of("p-old"));
         ArchivePreflightService preflights = new ArchivePreflightService(upstream, catalog, new ArchiveSpeedService(),
-                new ArchivePreflightEvents(new tools.jackson.databind.ObjectMapper()));
+                new ArchivePreflightEvents(new tools.jackson.databind.ObjectMapper()), mock(UserClient.class));
         ArchiveChannelStatusService service = new ArchiveChannelStatusService(repository, preflights, upstream, catalog);
         try {
             ArchiveChannelStatusService.ChannelArchiveStatus status = service.status("channel", "viewer").block();
@@ -60,7 +60,7 @@ class ArchiveChannelStatusServiceTest {
         UpstreamClient upstream = mock(UpstreamClient.class);
         CatalogClient catalog = mock(CatalogClient.class);
         ArchivePreflightService preflights = new ArchivePreflightService(upstream, catalog, new ArchiveSpeedService(),
-                new ArchivePreflightEvents(new tools.jackson.databind.ObjectMapper()));
+                new ArchivePreflightEvents(new tools.jackson.databind.ObjectMapper()), mock(UserClient.class));
         ArchiveChannelStatusService service = new ArchiveChannelStatusService(repository, preflights, upstream, catalog);
         try {
             ArchiveChannelStatusService.ChannelArchiveStatus status = service.status("channel", "viewer").block();

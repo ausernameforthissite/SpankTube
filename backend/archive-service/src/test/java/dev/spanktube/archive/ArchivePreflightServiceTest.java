@@ -349,6 +349,37 @@ class ArchivePreflightServiceTest {
     }
 
     @Test
+    void skipsMembersOnlyVideoAndPreservesItsReason() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1", "members", "v2"), null));
+        org.springframework.web.client.HttpClientErrorException membersOnly = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "Bad Gateway", org.springframework.http.HttpHeaders.EMPTY,
+                "{\"code\":\"FAILED\",\"message\":\"Join this channel to get access to members-only content like this video\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        when(upstream.video("members")).thenThrow(membersOnly);
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        when(upstream.video("v2")).thenReturn(download("v2"));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService());
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(
+                    ArchiveModels.Kind.PLAYLIST, "playlist", "viewer").block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.videoIds()).containsExactly("v1", "v2");
+            assertThat(estimate.skippedVideoCount()).isEqualTo(1);
+            assertThat(estimate.skippedVideos()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.videoId()).isEqualTo("members");
+                assertThat(skipped.reason()).contains("members-only content");
+            });
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void retriesTimeoutOnceAndCompletes() {
         UpstreamClient upstream = mock(UpstreamClient.class);
         CatalogClient catalog = mock(CatalogClient.class);
@@ -453,6 +484,59 @@ class ArchivePreflightServiceTest {
     }
 
     @Test
+    void excludesFilteredVideosFromQueueAndEstimate() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        UserClient users = mock(UserClient.class);
+        when(users.archiveTargetHeight("viewer")).thenReturn(360);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1", "v2", "v3"), null));
+        when(upstream.video("v1")).thenReturn(download("v1", 100));
+        when(upstream.video("v2")).thenReturn(download("v2", 50));
+        when(upstream.video("v3")).thenReturn(download("v3", 100));
+        when(catalog.existing(eq("viewer"), anyString())).thenReturn(Optional.empty());
+        ArchiveFilter filter = new ArchiveFilter(ArchiveFilter.Mode.AND,
+                new ArchiveFilter.NumericCondition(100L, null, null, null, null), null, null);
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService(), users);
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(ArchiveModels.Kind.PLAYLIST,
+                    "playlist", "viewer", "filtered", filter).block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.videoIds()).containsExactly("v1", "v3");
+            assertThat(estimate.filteredVideoCount()).isEqualTo(1);
+            assertThat(estimate.newVideoCount()).isEqualTo(2);
+            assertThat(estimate.totalBytes()).isEqualTo(3750);
+            assertThat(estimate.targetHeight()).isEqualTo(360);
+            assertThat(service.status("viewer", "filtered").filteredVideoCount()).isEqualTo(1);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void perEstimateQualityOverridesSavedDefault() {
+        UpstreamClient upstream = mock(UpstreamClient.class);
+        CatalogClient catalog = mock(CatalogClient.class);
+        UserClient users = mock(UserClient.class);
+        when(users.archiveTargetHeight("viewer")).thenReturn(360);
+        when(upstream.playlistVideos("playlist", null))
+                .thenReturn(new UpstreamClient.PageItems(List.of("v1"), null));
+        when(upstream.video("v1")).thenReturn(download("v1"));
+        when(catalog.existing("viewer", "v1")).thenReturn(Optional.empty());
+        ArchivePreflightService service = service(upstream, catalog, new ArchiveSpeedService(), users);
+        try {
+            ArchivePreflightService.Estimate estimate = service.estimate(ArchiveModels.Kind.PLAYLIST,
+                    "playlist", "viewer", "quality", null, 240).block();
+
+            assertThat(estimate).isNotNull();
+            assertThat(estimate.targetHeight()).isEqualTo(240);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void preservesDownstreamErrorFromParallelCollection() {
         UpstreamClient upstream = mock(UpstreamClient.class);
         CatalogClient catalog = mock(CatalogClient.class);
@@ -477,7 +561,18 @@ class ArchivePreflightServiceTest {
 
     private static ArchivePreflightService service(UpstreamClient upstream, CatalogClient catalog,
             ArchiveSpeedService speed) {
-        return new ArchivePreflightService(upstream, catalog, speed, new ArchivePreflightEvents(new ObjectMapper()));
+        return service(upstream, catalog, speed, mock(UserClient.class));
+    }
+
+    private static ArchivePreflightService service(UpstreamClient upstream, CatalogClient catalog,
+            ArchiveSpeedService speed, UserClient users) {
+        return new ArchivePreflightService(upstream, catalog, speed, new ArchivePreflightEvents(new ObjectMapper()), users);
+    }
+
+    private static UpstreamClient.VideoDownload download(String videoId, long likes) {
+        UpstreamClient.VideoDownload source = download(videoId);
+        return new UpstreamClient.VideoDownload(source.metadata(), source.estimatedBytes(), source.formats(),
+                source.subtitles(), source.chapters(), likes, 0L);
     }
 
     private static UpstreamClient.VideoDownload download(String videoId) {

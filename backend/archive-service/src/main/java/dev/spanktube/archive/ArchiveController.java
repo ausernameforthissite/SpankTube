@@ -31,10 +31,11 @@ class ArchiveController {
     private final ArchiveProperties properties;
     private final PlaylistThumbnailService playlistThumbnails;
     private final ArchivePreflightService preflights;
+    private final UserClient users;
 
     ArchiveController(ArchiveJobService jobs, UpstreamClient upstreamClient, CatalogClient catalogClient,
             ArchiveEvents events, ArchiveProperties properties, PlaylistThumbnailService playlistThumbnails,
-            ArchivePreflightService preflights) {
+            ArchivePreflightService preflights, UserClient users) {
         this.jobs = jobs;
         this.upstreamClient = upstreamClient;
         this.catalogClient = catalogClient;
@@ -42,6 +43,7 @@ class ArchiveController {
         this.properties = properties;
         this.playlistThumbnails = playlistThumbnails;
         this.preflights = preflights;
+        this.users = users;
     }
 
     @PostMapping("/api/v1/videos/{videoId}/save")
@@ -78,7 +80,7 @@ class ArchiveController {
         playlistThumbnails.save(playlistId, playlist.thumbnailUrl());
         catalogClient.registerPlaylist(username(request), playlistId, playlist.title(), playlist.channelId(),
                 estimate.videoIds());
-        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, estimate.videoIds(), request);
+        return enqueue(ArchiveModels.Kind.PLAYLIST, playlistId, estimate.videoIds(), request, estimate.targetHeight());
     }
 
     @PostMapping("/api/v1/channels/{channelId}/save")
@@ -87,7 +89,7 @@ class ArchiveController {
         ArchivePreflightService.Estimate estimate = preflights.validate(estimateId, ArchiveModels.Kind.CHANNEL,
                 channelId, username(request));
         registerChannelPlaylists(channelId, username(request));
-        return enqueue(ArchiveModels.Kind.CHANNEL, channelId, estimate.videoIds(), request);
+        return enqueue(ArchiveModels.Kind.CHANNEL, channelId, estimate.videoIds(), request, estimate.targetHeight());
     }
 
     private void registerChannelPlaylists(String channelId, String username) {
@@ -172,8 +174,14 @@ class ArchiveController {
 
     private ResponseEntity<ArchiveModels.Job> enqueue(ArchiveModels.Kind kind, String targetId,
             List<String> videoIds, HttpServletRequest request) {
+        return enqueue(kind, targetId, videoIds, request, users.archiveTargetHeight(username(request)));
+    }
+
+    private ResponseEntity<ArchiveModels.Job> enqueue(ArchiveModels.Kind kind, String targetId,
+            List<String> videoIds, HttpServletRequest request, Integer targetHeight) {
         return enqueue(kind, targetId, videoIds, request,
-                new ArchiveModels.EnqueueRequest(username(request), role(request), kind, targetId, videoIds));
+                new ArchiveModels.EnqueueRequest(username(request), role(request), kind, targetId, videoIds,
+                        ArchiveModels.Purpose.ARCHIVE, ArchiveModels.DownloadOptions.archiveDefaults(targetHeight)));
     }
 
     private ResponseEntity<ArchiveModels.Job> enqueue(ArchiveModels.Kind kind, String targetId,

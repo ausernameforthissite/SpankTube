@@ -6,6 +6,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,9 +18,27 @@ class ArchiveControllerTest {
     private final CatalogClient catalog = mock(CatalogClient.class);
     private final PlaylistThumbnailService thumbnails = mock(PlaylistThumbnailService.class);
     private final ArchivePreflightService preflights = mock(ArchivePreflightService.class);
+    private final UserClient users = mock(UserClient.class);
     private final ArchiveController controller = new ArchiveController(jobs, upstream, catalog,
             mock(ArchiveEvents.class), new ArchiveProperties("/archive", 2, 5, Duration.ofHours(1), 2000), thumbnails,
-            preflights);
+            preflights, users);
+
+    @Test
+    void individualArchiveUsesSavedQualityDefault() {
+        when(users.archiveTargetHeight("viewer")).thenReturn(360);
+        when(jobs.enqueue(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new ArchiveModels.EnqueueResult(mock(ArchiveModels.Job.class), true));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-SpankTube-User", "viewer");
+        request.addHeader("X-SpankTube-Roles", "ROLE_VIEWER");
+
+        controller.saveVideo("video", request);
+
+        var enqueue = org.mockito.ArgumentCaptor.forClass(ArchiveModels.EnqueueRequest.class);
+        verify(jobs).enqueue(enqueue.capture());
+        assertThat(enqueue.getValue().kind()).isEqualTo(ArchiveModels.Kind.VIDEO);
+        assertThat(enqueue.getValue().options().targetHeight()).isEqualTo(360);
+    }
 
     @Test
     void savesAssignedPlaylistThumbnail() {

@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -28,6 +29,7 @@ class OnDemandDashService {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(OnDemandDashService.class);
     private static final Duration PROBE_TIMEOUT = Duration.ofMinutes(5);
     private static final Duration SEGMENT_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration SUBTITLE_TIMEOUT = Duration.ofMinutes(5);
     private static final Pattern FRAGMENT = Pattern.compile("gop-([av])(\\d*)-(\\d{5})\\.m4s");
     private static final Pattern INIT = Pattern.compile("init-([av])(\\d*)\\.m4s");
 
@@ -272,7 +274,7 @@ class OnDemandDashService {
 
     void createSubtitle(Path source, int track, Path output) {
         run(new ArrayList<>(List.of(ffmpeg, "-v", "error", "-y", "-i", source.toString(),
-                "-map", "0:s:" + track, "-f", "webvtt", output.toString())), SEGMENT_TIMEOUT);
+                "-map", "0:s:" + track, "-f", "webvtt", output.toString())), SUBTITLE_TIMEOUT);
     }
 
     void createExternalSubtitle(Path source, Path output) {
@@ -377,7 +379,30 @@ class OnDemandDashService {
             createFragment(source, video, track, start, end, output);
             return;
         }
-        run(fragmentCommand(source, video, track, transcode, start, end, output, browserCompatibility), SEGMENT_TIMEOUT);
+        boolean localMp4 = browserCompatibility
+                && source.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".mp4");
+        if (browserCompatibility && video) {
+            createLocalVideoFragment(source, track, transcode, start, end, output);
+            return;
+        }
+        run(fragmentCommand(source, video, track, transcode, start, end, output, browserCompatibility,
+                localMp4 && !video), SEGMENT_TIMEOUT);
+    }
+
+    private void createLocalVideoFragment(Path source, int track, boolean transcode,
+            double start, double end, Path output) {
+        Path ordinary = output.resolveSibling(output.getFileName().toString() + ".seek.mp4");
+        try {
+            for (List<String> command : localVideoCommands(source, track, transcode, start, end, output)) {
+                run(command, SEGMENT_TIMEOUT);
+            }
+        } finally {
+            try {
+                Files.deleteIfExists(ordinary);
+            } catch (IOException error) {
+                LOGGER.warn("Unable to delete temporary MP4 seek media: {}", error.getMessage());
+            }
+        }
     }
 
     List<String> fragmentCommand(Path source, boolean video, double start, double end, Path output) {
@@ -388,6 +413,24 @@ class OnDemandDashService {
         return fragmentCommand(source, video, track, false, start, end, output);
     }
 
+    List<List<String>> mp4VideoCommands(Path source, int track, double start, double end, Path output) {
+        return localVideoCommands(source, track, false, start, end, output);
+    }
+
+    List<List<String>> localVideoCommands(Path source, int track, boolean transcode,
+            double start, double end, Path output) {
+        Path ordinary = output.resolveSibling(output.getFileName().toString() + ".seek.mp4");
+        List<String> seek = fragmentCommand(source, true, track, false, start, end, ordinary, true, false);
+        int bsf = seek.indexOf("-bsf");
+        seek.remove(bsf + 1);
+        seek.remove(bsf);
+        int movflags = seek.indexOf("-movflags");
+        seek.remove(movflags + 1);
+        seek.remove(movflags);
+        return List.of(seek, fragmentCommand(ordinary, true, track, transcode, 0, end - start, output,
+                true, false));
+    }
+
     List<String> fragmentCommand(Path source, boolean video, int track, boolean transcode,
             double start, double end, Path output) {
         return fragmentCommand(source, video, track, transcode, start, end, output, false);
@@ -395,13 +438,25 @@ class OnDemandDashService {
 
     List<String> fragmentCommand(Path source, boolean video, int track, boolean transcode,
             double start, double end, Path output, boolean browserCompatibility) {
+        return fragmentCommand(source, video, track, transcode, start, end, output, browserCompatibility, false);
+    }
+
+    List<String> fragmentCommand(Path source, boolean video, int track, boolean transcode,
+            double start, double end, Path output, boolean browserCompatibility, boolean outputSeek) {
         if (end <= start) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid keyframe interval");
         }
         String offset = Long.toString(Math.round(start * 1000));
-        List<String> command = new ArrayList<>(List.of(ffmpeg, "-v", "error", "-y",
-                "-ss", seconds(start), "-i", source.toString(),
-                "-map", video ? "0:v:0" : "0:a:" + track));
+        List<String> command = new ArrayList<>(List.of(ffmpeg, "-v", "error", "-y"));
+        if (!outputSeek) {
+            command.addAll(List.of("-ss", seconds(start)));
+        }
+        command.add("-i");
+        command.add(source.toString());
+        if (outputSeek) {
+            command.addAll(List.of("-ss", seconds(start)));
+        }
+        command.addAll(List.of("-map", video ? "0:v:0" : "0:a:" + track));
         if (browserCompatibility) {
             command.addAll(List.of("-map_chapters", "-1"));
         }
@@ -500,7 +555,7 @@ class OnDemandDashService {
             result.append(">\n");
         }
         result.append("<Representation id=\"").append(representationId)
-                .append("\" codecs=\"").append(escape(video ? videoCodec(stream)
+                .append("\" codecs=\"").append(escape(video ? videoCodec(stream, browserCompatibility && requiresVideoTranscode(stream))
                         : audioCodec(stream, browserCompatibility && requiresAac(stream))))
                 .append("\" bandwidth=\"").append(index.bandwidth()).append('"');
         if (video && stream.width() > 0) {
@@ -528,7 +583,10 @@ class OnDemandDashService {
         result.append("</SegmentTimeline>\n</SegmentTemplate>\n</Representation>\n</AdaptationSet>\n");
     }
 
-    private static String videoCodec(StreamMetadata stream) {
+    private static String videoCodec(StreamMetadata stream, boolean transcode) {
+        if (transcode) {
+            return "avc1.640033";
+        }
         if ("vp9".equals(stream.codec())) {
             return "vp09.00.10.08";
         }
@@ -547,6 +605,9 @@ class OnDemandDashService {
     }
 
     private static boolean requiresVideoTranscode(StreamMetadata stream) {
+        if (!Set.of("h264", "vp9", "av1").contains(stream.codec())) {
+            return true;
+        }
         if (!"h264".equals(stream.codec())) {
             return false;
         }

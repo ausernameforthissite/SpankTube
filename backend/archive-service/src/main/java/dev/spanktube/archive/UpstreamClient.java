@@ -88,17 +88,23 @@ class UpstreamClient {
                 video == null ? null : video.width(), video == null ? null : video.height(),
                 video == null ? null : video.codecs(), audio == null ? null : audio.codecs(),
                 string(data, "description"), audio == null ? null : audio.bitrate());
-        return new VideoDownload(metadata, estimated, formats, subtitles(data), chapters(data));
+        return new VideoDownload(metadata, estimated, formats, subtitles(data), chapters(data),
+                longValue(data, "likeCount"), longValue(data, "viewCount"));
     }
 
     record VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes, List<FormatOption> formats,
-            List<SubtitleOption> subtitles, List<ChapterOption> chapters) {
+            List<SubtitleOption> subtitles, List<ChapterOption> chapters, Long likeCount, Long viewCount) {
+        VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes, List<FormatOption> formats,
+                List<SubtitleOption> subtitles, List<ChapterOption> chapters) {
+            this(metadata, estimatedBytes, formats, subtitles, chapters, null, null);
+        }
+
         VideoDownload(ArchiveModels.ExistingVideo metadata, long estimatedBytes) {
             this(metadata, estimatedBytes, List.of(), List.of(), List.of());
         }
 
         Selection select(ArchiveModels.DownloadOptions options) {
-            FormatOption video = options.videoFormatId() == null ? bestVideo(formats)
+            FormatOption video = options.videoFormatId() == null ? bestVideo(formats, options.targetHeight())
                     : find(options.videoFormatId(), true);
             FormatOption audio = options.audioFormatId() == null
                     ? options.videoOnly() ? null : bestAudio(formats) : find(options.audioFormatId(), false);
@@ -183,11 +189,35 @@ class UpstreamClient {
     }
 
     private static FormatOption bestVideo(List<FormatOption> formats) {
+        return bestVideo(formats, null);
+    }
+
+    private static FormatOption bestVideo(List<FormatOption> formats, Integer targetHeight) {
+        if (targetHeight != null) {
+            return formats.stream().filter(format -> format.hasVideo())
+                    .min(Comparator.comparingLong((FormatOption format) -> Math.abs((long) height(format) - targetHeight))
+                            .thenComparing(Comparator.comparingInt((FormatOption format) -> height(format)).reversed())
+                            .thenComparing(Comparator.comparingLong((FormatOption format) -> bitrate(format)).reversed())
+                            .thenComparing(Comparator.comparingDouble((FormatOption format) -> fps(format)).reversed()))
+                    .orElse(null);
+        }
         return formats.stream().filter(format -> format.hasVideo())
-                .max(Comparator.comparingInt((FormatOption format) -> format.height() == null ? 0 : format.height())
-                        .thenComparingLong(format -> format.bitrate() == null ? 0 : format.bitrate())
-                        .thenComparingDouble(format -> format.fps() == null ? 0 : format.fps()))
+                .max(Comparator.comparingInt((FormatOption format) -> height(format))
+                        .thenComparingLong(format -> bitrate(format))
+                        .thenComparingDouble(format -> fps(format)))
                 .orElse(null);
+    }
+
+    private static int height(FormatOption format) {
+        return format.height() == null ? 0 : format.height();
+    }
+
+    private static long bitrate(FormatOption format) {
+        return format.bitrate() == null ? 0 : format.bitrate();
+    }
+
+    private static double fps(FormatOption format) {
+        return format.fps() == null ? 0 : format.fps();
     }
 
     private static FormatOption bestAudio(List<FormatOption> formats) {

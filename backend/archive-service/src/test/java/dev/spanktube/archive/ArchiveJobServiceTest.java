@@ -86,7 +86,8 @@ class ArchiveJobServiceTest {
         when(publisher.publish(any())).thenReturn(Mono.empty());
 
         ArchiveModels.EnqueueResult result = service.enqueue(new ArchiveModels.EnqueueRequest(
-                "viewer", "VIEWER", ArchiveModels.Kind.CHANNEL, "channel", List.of("one", "two", "one")));
+                "viewer", "VIEWER", ArchiveModels.Kind.CHANNEL, "channel", List.of("one", "two", "one"),
+                ArchiveModels.Purpose.ARCHIVE, ArchiveModels.DownloadOptions.archiveDefaults(360)));
 
         org.mockito.ArgumentCaptor<ArchiveModels.EnqueueRequest> requests =
                 org.mockito.ArgumentCaptor.forClass(ArchiveModels.EnqueueRequest.class);
@@ -95,6 +96,8 @@ class ArchiveJobServiceTest {
         assertThat(requests.getValue().kind()).isEqualTo(ArchiveModels.Kind.VIDEO);
         assertThat(requests.getAllValues()).extracting(ArchiveModels.EnqueueRequest::targetId)
                 .containsExactly("one", "two");
+        assertThat(requests.getAllValues()).allSatisfy(request ->
+                assertThat(request.options().targetHeight()).isEqualTo(360));
     }
 
     @Test

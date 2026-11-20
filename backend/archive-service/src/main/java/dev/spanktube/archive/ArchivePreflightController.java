@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.JsonNode;
 
 @RestController
 class ArchivePreflightController {
@@ -33,7 +34,22 @@ class ArchivePreflightController {
         } catch (RuntimeException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown archive kind");
         }
-        return ResponseEntity.accepted().body(preflights.start(kind, request.targetId(), username, request.estimateId()));
+        if (request.targetHeight() == null) {
+            return ResponseEntity.accepted().body(preflights.start(kind, request.targetId(), username, request.estimateId(),
+                    request.filter()));
+        }
+        Integer targetHeight = null;
+        if (!request.targetHeight().isNull()) {
+            JsonNode value = request.targetHeight();
+            long height = value.isIntegralNumber() ? value.longValue() : -1;
+            if (height < 1 || height > 10_000) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Archive target height must be between 1 and 10000");
+            }
+            targetHeight = (int) height;
+        }
+        return ResponseEntity.accepted().body(preflights.start(kind, request.targetId(), username, request.estimateId(),
+                request.filter(), targetHeight));
     }
 
     @GetMapping("/api/v1/archive/estimate/{estimateId}")
@@ -60,6 +76,6 @@ class ArchivePreflightController {
         return username;
     }
 
-    record EstimateRequest(String kind, String targetId, String estimateId) {
+    record EstimateRequest(String kind, String targetId, String estimateId, ArchiveFilter filter, JsonNode targetHeight) {
     }
 }

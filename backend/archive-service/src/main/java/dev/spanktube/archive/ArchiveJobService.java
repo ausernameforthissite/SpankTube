@@ -45,7 +45,8 @@ class ArchiveJobService {
             boolean created = false;
             for (String videoId : request.videoIds().stream().distinct().toList()) {
                 ArchiveModels.EnqueueResult result = enqueue(new ArchiveModels.EnqueueRequest(
-                        request.owner(), request.role(), ArchiveModels.Kind.VIDEO, videoId, List.of(videoId)));
+                        request.owner(), request.role(), ArchiveModels.Kind.VIDEO, videoId, List.of(videoId),
+                        request.purpose(), request.options()));
                 if (first == null) first = result;
                 created |= result.created();
             }

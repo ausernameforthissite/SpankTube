@@ -39,7 +39,9 @@ class WatchProgressHandler {
         }
         String role = userClient.role(progress.username());
         jobs.enqueue(new ArchiveModels.EnqueueRequest(progress.username(), role,
-                ArchiveModels.Kind.VIDEO, progress.videoId(), java.util.List.of(progress.videoId())));
+                ArchiveModels.Kind.VIDEO, progress.videoId(), java.util.List.of(progress.videoId()),
+                ArchiveModels.Purpose.ARCHIVE,
+                ArchiveModels.DownloadOptions.archiveDefaults(userClient.archiveTargetHeight(progress.username()))));
         return Mono.empty();
     }
 

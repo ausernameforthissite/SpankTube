@@ -57,6 +57,27 @@ class UpstreamClientTest {
     }
 
     @Test
+    void selectsNearestTargetHeightAndHigherResolutionOnTie() {
+        ArchiveModels.ExistingVideo metadata = org.mockito.Mockito.mock(ArchiveModels.ExistingVideo.class);
+        org.mockito.Mockito.when(metadata.durationSeconds()).thenReturn(100L);
+        UpstreamClient.FormatOption v360 = format("360", 360);
+        UpstreamClient.FormatOption v720 = format("720", 720);
+        UpstreamClient.FormatOption v1080 = format("1080", 1080);
+        UpstreamClient.VideoDownload video = new UpstreamClient.VideoDownload(metadata, 0,
+                java.util.List.of(v360, v720, v1080), java.util.List.of(), java.util.List.of());
+
+        assertThat(video.select(ArchiveModels.DownloadOptions.archiveDefaults(360)).video().formatId()).isEqualTo("360");
+        assertThat(video.select(ArchiveModels.DownloadOptions.archiveDefaults(540)).video().formatId()).isEqualTo("720");
+        assertThat(video.select(ArchiveModels.DownloadOptions.archiveDefaults(1000)).video().formatId()).isEqualTo("1080");
+        assertThat(video.select(ArchiveModels.DownloadOptions.archiveDefaults()).video().formatId()).isEqualTo("1080");
+    }
+
+    private static UpstreamClient.FormatOption format(String id, int height) {
+        return new UpstreamClient.FormatOption(id, "video/mp4", "avc1", height * 16 / 9, height,
+                25.0, (long) height * 1000, true, false, null);
+    }
+
+    @Test
     void returnsLiveManifestAndMetadata() throws Exception {
         String body = """
                 {"streamType":"LIVE_STREAM","liveHlsUrl":"https://manifest.googlevideo.com/live.m3u8",

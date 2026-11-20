@@ -22,16 +22,24 @@ class UserClient {
     }
 
     boolean autoArchive(String username) {
-        SettingsResponse response = client.get()
+        SettingsResponse response = settings(username);
+        return response.autoArchive() == null || response.autoArchive();
+    }
+
+    Integer archiveTargetHeight(String username) {
+        return settings(username).archiveTargetHeight();
+    }
+
+    private SettingsResponse settings(String username) {
+        return client.get()
                 .uri("/internal/v1/users/{username}/settings", username)
                 .retrieve()
                 .body(SettingsResponse.class);
-        return !Boolean.FALSE.equals(response.autoArchive());
     }
 
     record QuotaResponse(String role) {
     }
 
-    record SettingsResponse(Boolean autoArchive) {
+    record SettingsResponse(Boolean autoArchive, Integer archiveTargetHeight) {
     }
 }

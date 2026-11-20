@@ -4,6 +4,20 @@ import type shaka from "shaka-player/dist/shaka-player.compiled.js";
 type QualityTrack = ReturnType<shaka.Player["getVariantTracks"]>[number];
 type SettingsView = "closed" | "main" | "quality" | "speed" | "audio" | "subtitles";
 
+function subtitleTrackLabel(track: shaka.extern.TextTrack): string {
+  const code = track.language || "";
+  let language = code;
+  if (code && code !== "und") {
+    try {
+      language = new Intl.DisplayNames(["ru"], { type: "language" }).of(code) || code;
+    } catch {
+    }
+  }
+  const label = track.label?.trim() || "";
+  if (!label || label.toLowerCase() === code.toLowerCase() || label === language) return language || label || "Субтитры";
+  return language ? `${language} — ${label}` : label;
+}
+
 const PLAYBACK_RATES = [
   { value: 0.25, label: "0,25" },
   { value: 0.5, label: "0,5" },
@@ -88,7 +102,7 @@ export function PlayerSettingsMenu({ video, qualityTracks, selectedQuality, play
   const audio = audioTracks.find(track => track.audioId === selectedAudio);
   const subtitles = subtitleTracks.find(track => String(track.id) === selectedSubtitle);
   const audioLabel = audioTracks.length === 0 ? "Недоступно" : audio?.label || audio?.language || "Аудио";
-  const subtitleLabel = selectedSubtitle === "off" ? "Без субтитров" : subtitles?.label || subtitles?.language || "Включены";
+  const subtitleLabel = selectedSubtitle === "off" ? "Без субтитров" : subtitles ? subtitleTrackLabel(subtitles) : "Включены";
   const title = view === "quality" ? "Качество" : view === "speed" ? "Скорость воспроизведения"
     : view === "audio" ? "Звуковая дорожка" : "Субтитры";
   const compactSpeed = view === "speed" && window.matchMedia("(max-width: 640px)").matches;
@@ -164,7 +178,7 @@ export function PlayerSettingsMenu({ video, qualityTracks, selectedQuality, play
               key={track.id} aria-checked={selectedSubtitle === String(track.id)}
               onClick={() => chooseSubtitles(String(track.id))}>
               <span className="player-settings-check" aria-hidden="true">{selectedSubtitle === String(track.id) ? "✓" : ""}</span>
-              <span>{track.label || track.language}</span>
+              <span>{subtitleTrackLabel(track)}</span>
             </button>)}
           </>}
         </>}

@@ -16,9 +16,18 @@ final class ArchiveModels {
         SUBTITLES, SPONSORBLOCK, MUXING, CHAPTERS, FINISHING, COMPLETED, FAILED, EXPIRED
     }
 
-    record DownloadOptions(String videoFormatId, String audioFormatId, boolean subtitles, boolean sponsorBlock) {
+    record DownloadOptions(String videoFormatId, String audioFormatId, boolean subtitles, boolean sponsorBlock,
+            Integer targetHeight) {
+        DownloadOptions(String videoFormatId, String audioFormatId, boolean subtitles, boolean sponsorBlock) {
+            this(videoFormatId, audioFormatId, subtitles, sponsorBlock, null);
+        }
+
         static DownloadOptions archiveDefaults() {
-            return new DownloadOptions(null, null, true, true);
+            return new DownloadOptions(null, null, true, true, null);
+        }
+
+        static DownloadOptions archiveDefaults(Integer targetHeight) {
+            return new DownloadOptions(null, null, true, true, targetHeight);
         }
 
         boolean audioOnly() {
@@ -43,7 +52,8 @@ final class ArchiveModels {
         }
 
         String signature() {
-            return String.valueOf(videoFormatId) + "|" + audioFormatId + "|" + subtitles + "|" + sponsorBlock;
+            String signature = String.valueOf(videoFormatId) + "|" + audioFormatId + "|" + subtitles + "|" + sponsorBlock;
+            return targetHeight == null ? signature : signature + "|" + targetHeight;
         }
     }
 

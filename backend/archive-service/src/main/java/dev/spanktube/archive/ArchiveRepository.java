@@ -280,7 +280,8 @@ class ArchiveRepository {
         String[] parts = signature.split("\\|", -1);
         return new ArchiveModels.DownloadOptions("null".equals(parts[0]) ? null : parts[0],
                 "null".equals(parts[1]) ? null : parts[1],
-                Boolean.parseBoolean(parts[2]), Boolean.parseBoolean(parts[3]));
+                Boolean.parseBoolean(parts[2]), Boolean.parseBoolean(parts[3]),
+                parts.length > 4 && !"null".equals(parts[4]) ? Integer.valueOf(parts[4]) : null);
     }
 
     private ArchiveModels.JobItem mapItem(ResultSet rs) throws SQLException {

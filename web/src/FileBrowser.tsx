@@ -112,7 +112,7 @@ export function FileBrowser({ apiFetch, ensureAccessToken, settings, settingsLoa
       instance.setVideoContainer(videoElement.parentElement);
       instance.configure("textDisplayFactory", () => new SubtitleDisplayer(videoElement, videoElement.parentElement));
       await instance.attach(videoElement);
-      instance.configure("streaming.retryParameters.timeout", 120_000);
+      instance.configure("streaming.retryParameters.timeout", 300_000);
       instance.configure("streaming.retryParameters.connectionTimeout", 60_000);
       instance.configure("streaming.retryParameters.stallTimeout", 30_000);
       instance.configure("manifest.retryParameters.timeout", 5 * 60_000);

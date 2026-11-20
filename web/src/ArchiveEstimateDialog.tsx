@@ -1,4 +1,5 @@
-import type { ArchiveEstimate, ArchiveEstimateProgress } from "./types";
+import { ArchiveFilterForm } from "./ArchiveFilterForm";
+import type { ArchiveEstimate, ArchiveEstimateProgress, ArchiveFilter } from "./types";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} ГиБ`;
@@ -20,14 +21,16 @@ function formatAnalysisRate(videosPerSecond: number): string {
   return videosPerSecond > 0 ? `${videosPerSecond.toFixed(2)} видео/с` : "—";
 }
 
-export function ArchiveEstimateDialog({ title, estimate, progress, loading, onCancel, onConfirm, onRetry }: {
+export function ArchiveEstimateDialog({ title, estimate, progress, loading, defaultTargetHeight, onCancel, onConfirm, onRetry, onStart }: {
   title: string;
   estimate: ArchiveEstimate | null;
   progress: ArchiveEstimateProgress | null;
   loading: boolean;
+  defaultTargetHeight: number | null;
   onCancel: () => void;
   onConfirm: () => void;
   onRetry: () => void;
+  onStart: (filter: ArchiveFilter, targetHeight: number | null) => void;
 }) {
   const progressMessage = !progress ? "Создаю оценку…"
     : progress.status === "COLLECTING" ? progress.pageNumber > 0
@@ -36,11 +39,12 @@ export function ArchiveEstimateDialog({ title, estimate, progress, loading, onCa
     : progress.status === "ESTIMATING" ? `Проанализировано видео: ${progress.processedVideoCount} из ${progress.totalVideoCount}`
     : progress.status === "FAILED" ? "Не удалось оценить объём загрузки"
     : progress.status === "CANCELLED" ? "Оценка остановлена" : "Завершаю оценку…";
+  const configuring = !loading && !estimate && !progress;
   return <section className="archive-estimate" aria-label="Оценка архивации">
     <div className="popup-header"><strong>{title}</strong>
       <button className="popup-close" aria-label="Отменить архивацию" onClick={onCancel}>×</button>
     </div>
-    {loading || !estimate ? <div className="archive-estimate-progress" aria-live="polite">
+    {configuring ? <ArchiveFilterForm initialTargetHeight={defaultTargetHeight} onStart={onStart} /> : loading || !estimate ? <div className="archive-estimate-progress" aria-live="polite">
       <p role="status">{progressMessage}</p>
       {progress && <>
         {progress.status === "ESTIMATING" && progress.totalVideoCount > 0 &&
@@ -53,6 +57,7 @@ export function ArchiveEstimateDialog({ title, estimate, progress, loading, onCa
           </>}
           <span>Скорость анализа: <strong>{formatAnalysisRate(progress.videosPerSecond)}</strong></span>
           {progress.skippedVideoCount > 0 && <span>Пропущено недоступных: <strong>{progress.skippedVideoCount}</strong></span>}
+          {progress.filteredVideoCount > 0 && <span>Отфильтровано: <strong>{progress.filteredVideoCount}</strong></span>}
           {progress.totalBytes > 0 && <>
             <span>Новых видео: <strong>{progress.newVideoCount}</strong>, уже в архиве: {progress.existingVideoCount}</span>
             <span>Объём на сейчас: <strong>{formatBytes(progress.totalBytes)}</strong></span>
@@ -66,6 +71,7 @@ export function ArchiveEstimateDialog({ title, estimate, progress, loading, onCa
       <div className="archive-estimate-stats">
         <span>Всего видео: <strong>{estimate.totalVideoCount}</strong></span>
         <span>Новых: <strong>{estimate.newVideoCount}</strong>, уже в архиве: {estimate.existingVideoCount}</span>
+        {estimate.filteredVideoCount > 0 && <span>Отфильтровано: <strong>{estimate.filteredVideoCount}</strong></span>}
         <span>Видеодорожки: {formatBytes(estimate.videoBytes)}</span>
         <span>Аудиодорожки: {formatBytes(estimate.audioBytes)}</span>
         <span>Средняя скорость: видео {formatRate(estimate.videoBps)}, аудио {formatRate(estimate.audioBps)}</span>
@@ -79,7 +85,9 @@ export function ArchiveEstimateDialog({ title, estimate, progress, loading, onCa
       </details>}
       <p>Примерный объём: <strong>{formatBytes(estimate.totalBytes)}</strong><br />
         Примерное время: <strong>{formatDuration(estimate.estimatedSeconds)}</strong></p>
-      <button className="secondary" onClick={onConfirm}>Продолжить архивацию</button>
+      {estimate.newVideoCount + estimate.existingVideoCount > 0
+        ? <button className="secondary" onClick={onConfirm}>Продолжить архивацию</button>
+        : <p role="status">Нет видео, соответствующих выбранным условиям.</p>}
     </>}
   </section>;
 }

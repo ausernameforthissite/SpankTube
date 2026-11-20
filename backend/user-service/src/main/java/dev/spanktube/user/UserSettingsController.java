@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.JsonNode;
 
 @RestController
 class UserSettingsController {
@@ -32,7 +33,8 @@ class UserSettingsController {
     @Transactional
     public Settings update(@AuthenticationPrincipal Jwt jwt, @RequestBody SettingsPatch patch) {
         if (patch.autoArchive() == null && patch.autoplay() == null && patch.hideTechnicalDetails() == null
-                && patch.preferBestQuality() == null && patch.theme() == null) {
+                && patch.preferBestQuality() == null && patch.theme() == null && patch.archiveTargetHeight() == null
+                && patch.feedbackNotifications() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No settings to update");
         }
         String username = jwt.getSubject();
@@ -55,6 +57,25 @@ class UserSettingsController {
                     + "on conflict(username) do update set auto_archive = excluded.auto_archive",
                     username, patch.autoArchive());
         }
+        if (patch.feedbackNotifications() != null) {
+            jdbc.update("insert into user_settings(username, feedback_notifications) values (?, ?) "
+                    + "on conflict(username) do update set feedback_notifications = excluded.feedback_notifications",
+                    username, patch.feedbackNotifications());
+        }
+        if (patch.archiveTargetHeight() != null) {
+            JsonNode value = patch.archiveTargetHeight();
+            if (value.isNull()) {
+                jdbc.update("update user_settings set archive_target_height = null where username = ?", username);
+            } else {
+                if (!value.isIntegralNumber() || value.intValue() < 1 || value.intValue() > 10_000) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Archive target height must be between 1 and 10000");
+                }
+                jdbc.update("insert into user_settings(username, archive_target_height) values (?, ?) "
+                        + "on conflict(username) do update set archive_target_height = excluded.archive_target_height",
+                        username, value.intValue());
+            }
+        }
         if (patch.theme() != null) {
             if (!java.util.Set.of("system", "light", "dark").contains(patch.theme())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown theme");
@@ -72,19 +93,20 @@ class UserSettingsController {
 
     private Settings current(String username) {
         boolean filesAccess = localFileAccess.access(username).enabled();
-        return jdbc.query("select auto_archive, autoplay, hide_technical_details, prefer_best_quality, theme "
-                        + "from user_settings where username = ?",
+        return jdbc.query("select auto_archive, autoplay, hide_technical_details, prefer_best_quality, theme, "
+                        + "archive_target_height, feedback_notifications from user_settings where username = ?",
                 rs -> rs.next() ? new Settings(rs.getBoolean("auto_archive"), rs.getBoolean("autoplay"),
                         rs.getBoolean("hide_technical_details"), rs.getBoolean("prefer_best_quality"),
-                        rs.getString("theme"), filesAccess)
-                        : new Settings(true, true, false, true, "system", filesAccess), username);
+                        rs.getString("theme"), filesAccess, rs.getObject("archive_target_height", Integer.class),
+                        rs.getBoolean("feedback_notifications"))
+                        : new Settings(true, true, false, true, "system", filesAccess, null, true), username);
     }
 
     record Settings(boolean autoArchive, boolean autoplay, boolean hideTechnicalDetails, boolean preferBestQuality,
-            String theme, boolean localFilesAccess) {
+            String theme, boolean localFilesAccess, Integer archiveTargetHeight, boolean feedbackNotifications) {
     }
 
     record SettingsPatch(Boolean autoArchive, Boolean autoplay, Boolean hideTechnicalDetails,
-            Boolean preferBestQuality, String theme) {
+            Boolean preferBestQuality, String theme, JsonNode archiveTargetHeight, Boolean feedbackNotifications) {
     }
 }

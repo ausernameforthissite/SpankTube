@@ -30,7 +30,13 @@ export function UserMenu({ username, role, avatarUrl, settings, onChange, onNavi
         onNavigate("/files");
       }}>Видеофайлы</a>}
       <button className="link" onClick={() => onNavigate("/settings")}>Настройки</button>
-      {role === "ADMIN" && <button className="link" data-nav-url="/admin" onClick={() => onNavigate("/admin")}>Квоты</button>}
+      {role === "ADMIN" && <>
+        <a className="link" href="/admin/tickets" onClick={event => {
+          event.preventDefault();
+          onNavigate("/admin/tickets");
+        }}>Тикеты</a>
+        <button className="link" data-nav-url="/admin" onClick={() => onNavigate("/admin")}>Квоты</button>
+      </>}
       <label className="switch-row"><span>Тема</span>
         <select value={settings.theme} onChange={event => onChange({ theme: event.target.value as UserSettings["theme"] })}>
           <option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option>

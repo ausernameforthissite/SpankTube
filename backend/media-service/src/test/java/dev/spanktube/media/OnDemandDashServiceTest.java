@@ -1,5 +1,6 @@
 package dev.spanktube.media;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -93,6 +94,78 @@ class OnDemandDashServiceTest {
                 10.928, 20.938, directory.resolve("fragment.m4s"), true))
                 .containsSequence("-map_chapters", "-1");
         assertThat(command).doesNotContain("-map_chapters");
+    }
+
+    @Test
+    void convertsHevcMain10ToBrowserCompatibleH264() throws Exception {
+        AtomicInteger videoTranscodes = new AtomicInteger();
+        TestService service = new TestService() {
+            @Override
+            MediaIndex probe(Path source) {
+                return new MediaIndex(List.of(0.0, 2.0), 4.0,
+                        new StreamMetadata("hevc", "Main 10", -99, 1920, 1080, "25/1", null, null,
+                                "yuv420p10le", 0, 0),
+                        new StreamMetadata("ac3", "", -99, 0, 0, "", "rus", "MVO", null, 48000, 6),
+                        10_000_000L);
+            }
+
+            @Override
+            void createInit(Path source, boolean video, int track, boolean transcode, Path output,
+                    boolean browserCompatibility) {
+                if (video && transcode && browserCompatibility) {
+                    videoTranscodes.incrementAndGet();
+                }
+                try {
+                    Files.writeString(output, "init");
+                } catch (IOException error) {
+                    throw new AssertionError(error);
+                }
+            }
+        };
+        Path source = Files.writeString(directory.resolve("hdr.mkv"), "source");
+        Path cache = directory.resolve("cache");
+
+        service.prepare(source, cache, "local", "test", List.of(), true);
+        String manifest = Files.readString(cache.resolve("ondemand.mpd"));
+        service.segment(source, cache, "local", "init-v.m4s", null, List.of(), true);
+
+        assertThat(manifest).contains("avc1.640033", "mp4a.40.2").doesNotContain("hev1");
+        assertThat(videoTranscodes).hasValue(1);
+    }
+
+    @Test
+    void seeksLocalMp4WithoutRepeatedPreroll() {
+        TestService service = new TestService();
+        Path source = directory.resolve("local.mp4");
+        Path output = directory.resolve("gop.m4s");
+
+        List<List<String>> video = service.mp4VideoCommands(source, 0, 2, 4, output);
+        List<String> audio = service.fragmentCommand(source, false, 0, false, 2, 4, output,
+                true, true);
+
+        assertThat(video).hasSize(2);
+        assertThat(video.get(0)).containsSequence("-ss", "2.000", "-i", source.toString())
+                .doesNotContain("-movflags", "-bsf");
+        assertThat(video.get(1)).containsSequence("-ss", "0.000", "-i",
+                output.resolveSibling("gop.m4s.seek.mp4").toString());
+        assertThat(audio.indexOf("-ss")).isGreaterThan(audio.indexOf("-i"));
+        assertThat(audio).containsSequence("-ss", "2.000");
+    }
+
+    @Test
+    void usesTwoPassSeekForLocalMkvTranscode() {
+        TestService service = new TestService();
+        Path source = directory.resolve("source.mkv");
+        Path output = directory.resolve("gop.m4s");
+
+        List<List<String>> commands = service.localVideoCommands(source, 0, true, 2, 4, output);
+
+        assertThat(commands).hasSize(2);
+        assertThat(commands.get(0)).containsSequence("-ss", "2.000", "-i", source.toString())
+                .doesNotContain("-movflags", "-bsf", "libx264");
+        assertThat(commands.get(1)).containsSequence("-ss", "0.000", "-i",
+                output.resolveSibling("gop.m4s.seek.mp4").toString())
+                .containsSequence("-c:v", "libx264", "-preset", "veryfast");
     }
 
     @Test

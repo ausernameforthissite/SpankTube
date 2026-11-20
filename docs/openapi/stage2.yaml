@@ -902,6 +902,203 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StorageResponse' }
+  /api/v1/feedback/tickets:
+    get:
+      operationId: listFeedbackTickets
+      responses:
+        '200':
+          description: Tickets authored by or shared with the current user; administrators can see all tickets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FeedbackTicket' } }
+    post:
+      operationId: createFeedbackTicket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackTicketCreate' }
+      responses:
+        '201':
+          description: Ticket created in Accepted status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+  /api/v1/feedback/tickets/{ticketId}:
+    get:
+      operationId: getFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      responses:
+        '200':
+          description: Full ticket and chronological discussion
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/feedback/tickets/{ticketId}/comments:
+    post:
+      operationId: commentOnFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackTextRequest' }
+      responses:
+        '200':
+          description: Updated ticket; repeating the same requestId returns it without adding another comment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/feedback/tickets/{ticketId}/confirm:
+    post:
+      operationId: confirmFeedbackFix
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      responses:
+        '200':
+          description: Testing ticket confirmed and closed with Completed resolution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/feedback/tickets/{ticketId}/reopen:
+    post:
+      operationId: reopenFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackTextRequest' }
+      responses:
+        '200':
+          description: Completed or Answered ticket returned to Accepted with the reason preserved in history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/feedback/events:
+    get:
+      operationId: streamFeedbackEvents
+      responses:
+        '200':
+          description: SSE ready, ticket and ping events; ticket data contains its UUID
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /api/v1/admin/tickets:
+    get:
+      operationId: listAdminFeedbackTickets
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string, description: Case-insensitive subject/author search or a full/partial UUID }
+        - name: status
+          in: query
+          schema: { type: string, enum: [Accepted, In Progress, Testing, Done] }
+      responses:
+        '200':
+          description: Administrator ticket queue ordered by update time
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FeedbackTicket' } }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/tickets/{ticketId}:
+    get:
+      operationId: getAdminFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      responses:
+        '200':
+          description: Full administrator ticket card
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      operationId: changeAdminFeedbackTicketTypeAndPriority
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackMetadataPatch' }
+      responses:
+        '200':
+          description: Updated ticket with a system history entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/tickets/{ticketId}/comments:
+    post:
+      operationId: commentOnAdminFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackTextRequest' }
+      responses:
+        '200':
+          description: Updated ticket; requestId makes network retries idempotent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/tickets/{ticketId}/in-progress:
+    post:
+      operationId: moveAdminFeedbackTicketToWork
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      responses:
+        '200':
+          description: Accepted or Testing ticket moved to In Progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/tickets/{ticketId}/testing:
+    post:
+      operationId: sendAdminFeedbackTicketToTesting
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      responses:
+        '200':
+          description: In Progress ticket sent for user verification
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/tickets/{ticketId}/close:
+    post:
+      operationId: closeAdminFeedbackTicket
+      parameters: [{ $ref: '#/components/parameters/TicketId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackCloseRequest' }
+      responses:
+        '200':
+          description: Ticket closed; duplicate access grants and history are committed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     bearerAuth:
@@ -929,6 +1126,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   responses:
     Error:
       description: Error
@@ -1192,6 +1394,7 @@ components:
         audioFormatId: { type: [string, 'null'], description: Null selects best audio or video-only with a selected video track }
         subtitles: { type: boolean, default: true, description: Human-created subtitles only }
         sponsorBlock: { type: boolean, default: true }
+        targetHeight: { type: [integer, 'null'], minimum: 1, description: Nearest target height used by archive jobs; explicit format IDs take precedence for downloads }
     LiveRecordingRequest:
       type: object
       description: Exact Shaka variant selected when recording starts; omitted values select the best available quality
@@ -1272,7 +1475,7 @@ components:
         username: { type: string }
     UserSettings:
       type: object
-      required: [autoArchive, autoplay, hideTechnicalDetails, preferBestQuality, theme, localFilesAccess]
+      required: [autoArchive, autoplay, hideTechnicalDetails, preferBestQuality, theme, localFilesAccess, archiveTargetHeight, feedbackNotifications]
       properties:
         autoArchive: { type: boolean, default: true }
         autoplay: { type: boolean, default: true }
@@ -1280,6 +1483,8 @@ components:
         preferBestQuality: { type: boolean, default: true }
         theme: { type: string, enum: [system, light, dark], default: system }
         localFilesAccess: { type: boolean, default: false, description: Read-only local NFS browser access; always true for administrators }
+        archiveTargetHeight: { type: [integer, 'null'], minimum: 1, maximum: 10000, description: Nearest video height for archiving; null selects the best available quality }
+        feedbackNotifications: { type: boolean, default: true, description: Independent preference for feedback-ticket update notifications }
     SettingsPatch:
       type: object
       minProperties: 1
@@ -1289,6 +1494,87 @@ components:
         hideTechnicalDetails: { type: boolean }
         preferBestQuality: { type: boolean }
         theme: { type: string, enum: [system, light, dark] }
+        archiveTargetHeight: { type: [integer, 'null'], minimum: 1, maximum: 10000, description: Null explicitly restores best-quality archiving }
+        feedbackNotifications: { type: boolean }
+    FeedbackTicketCreate:
+      type: object
+      required: [subject, description]
+      properties:
+        subject: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, minLength: 1, maxLength: 8000 }
+        type: { type: string, enum: [Question, Bug, Feature, Improvement], default: Question }
+        priority: { type: string, enum: [Minor, Major, Critical, Blocker], default: Major }
+    FeedbackTextRequest:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 8000 }
+        requestId: { type: string, format: uuid, description: Stable client request ID for idempotent comment retries; optional for other text actions }
+    FeedbackCloseRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [Answered, Rejected, Duplicate] }
+        duplicateOf: { type: [string, 'null'], description: Required for Duplicate; full UUID or unique UUID prefix of an existing non-duplicate ticket }
+    FeedbackMetadataPatch:
+      type: object
+      minProperties: 1
+      properties:
+        type: { type: string, enum: [Question, Bug, Feature, Improvement] }
+        priority: { type: string, enum: [Minor, Major, Critical, Blocker] }
+    FeedbackEntry:
+      type: object
+      required: [id, author, role, kind, text, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        author: { type: [string, 'null'] }
+        role: { type: string, enum: [USER, ADMIN, SYSTEM] }
+        kind: { type: string, enum: [COMMENT, SYSTEM, REOPEN] }
+        text: { type: string, maxLength: 8000 }
+        createdAt: { type: string, format: date-time }
+    FeedbackTicket:
+      type: object
+      required: [id, shortId, subject, description, author, type, priority, status, resolution, duplicateOf, duplicateSubject, createdAt, updatedAt, entries]
+      properties:
+        id: { type: string, format: uuid }
+        shortId: { type: string, description: First eight uppercase UUID characters }
+        subject: { type: string, maxLength: 160 }
+        description: { type: string, maxLength: 8000 }
+        author: { type: string }
+        type: { type: string, enum: [Question, Bug, Feature, Improvement] }
+        priority: { type: string, enum: [Minor, Major, Critical, Blocker] }
+        status: { type: string, enum: [Accepted, In Progress, Testing, Done] }
+        resolution: { type: [string, 'null'], enum: [Completed, Answered, Rejected, Duplicate, null] }
+        duplicateOf: { type: [string, 'null'], format: uuid }
+        duplicateSubject: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/FeedbackEntry' }
+    ArchiveFilter:
+      type: object
+      properties:
+        mode: { type: string, enum: [AND, OR], default: AND }
+        likes: { $ref: '#/components/schemas/ArchiveNumericFilter' }
+        views: { $ref: '#/components/schemas/ArchiveNumericFilter' }
+        publishedAt: { $ref: '#/components/schemas/ArchiveDateFilter' }
+    ArchiveNumericFilter:
+      type: object
+      properties:
+        exact: { type: [integer, 'null'], format: int64, minimum: 0 }
+        minimum: { type: [integer, 'null'], format: int64, minimum: 0 }
+        maximum: { type: [integer, 'null'], format: int64, minimum: 0 }
+        minimumInclusive: { type: boolean, default: true }
+        maximumInclusive: { type: boolean, default: true }
+    ArchiveDateFilter:
+      type: object
+      properties:
+        exact: { type: [string, 'null'], format: date-time }
+        minimum: { type: [string, 'null'], format: date-time }
+        maximum: { type: [string, 'null'], format: date-time }
+        minimumInclusive: { type: boolean, default: true }
+        maximumInclusive: { type: boolean, default: true }
     ArchiveEstimateRequest:
       type: object
       required: [kind, targetId]
@@ -1296,9 +1582,11 @@ components:
         kind: { type: string, enum: [PLAYLIST, CHANNEL] }
         targetId: { type: string }
         estimateId: { type: string, format: uuid, description: Optional client-generated id used for SSE estimation progress and cancellation }
+        filter: { $ref: '#/components/schemas/ArchiveFilter', description: AND/OR conditions evaluated from video metadata before selection; omitted filter archives all videos }
+        targetHeight: { type: [integer, 'null'], minimum: 1, maximum: 10000, description: Per-operation nearest video height; omitted uses the saved user default, explicit null selects best available }
     ArchiveEstimate:
       type: object
-      required: [estimateId, kind, targetId, owner, totalVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, skippedVideoCount, skippedVideos, videoIds, createdAt]
+      required: [estimateId, kind, targetId, owner, totalVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, skippedVideoCount, filteredVideoCount, skippedVideos, videoIds, createdAt]
       properties:
         estimateId: { type: string, format: uuid }
         kind: { type: string, enum: [PLAYLIST, CHANNEL] }
@@ -1314,6 +1602,7 @@ components:
         videoBps: { type: integer, format: int64 }
         audioBps: { type: integer, format: int64 }
         skippedVideoCount: { type: integer }
+        filteredVideoCount: { type: integer, description: Videos excluded by the active archive filter }
         skippedVideos:
           type: array
           items: { $ref: '#/components/schemas/SkippedVideo' }
@@ -1323,7 +1612,7 @@ components:
         createdAt: { type: string, format: date-time }
     ArchiveEstimateProgress:
       type: object
-      required: [estimateId, kind, targetId, owner, status, totalVideoCount, processedVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, discoveredVideoCount, pageNumber, pageVideoCount, remainingOnPage, videosPerSecond, createdAt, updatedAt, skippedVideoCount, skippedVideos]
+      required: [estimateId, kind, targetId, owner, status, totalVideoCount, processedVideoCount, newVideoCount, existingVideoCount, videoBytes, audioBytes, totalBytes, estimatedSeconds, videoBps, audioBps, discoveredVideoCount, pageNumber, pageVideoCount, remainingOnPage, videosPerSecond, createdAt, updatedAt, skippedVideoCount, filteredVideoCount, skippedVideos]
       properties:
         estimateId: { type: string, format: uuid }
         kind: { type: string, enum: [PLAYLIST, CHANNEL] }
@@ -1349,6 +1638,7 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         skippedVideoCount: { type: integer }
+        filteredVideoCount: { type: integer, description: Videos excluded by the active archive filter }
         skippedVideos:
           type: array
           items: { $ref: '#/components/schemas/SkippedVideo' }

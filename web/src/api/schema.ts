@@ -900,6 +900,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/feedback/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackTickets"];
+        put?: never;
+        post: operations["createFeedbackTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/tickets/{ticketId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getFeedbackTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/tickets/{ticketId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["commentOnFeedbackTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/tickets/{ticketId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["confirmFeedbackFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/tickets/{ticketId}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reopenFeedbackTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamFeedbackEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminFeedbackTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tickets/{ticketId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAdminFeedbackTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["changeAdminFeedbackTicketTypeAndPriority"];
+        trace?: never;
+    };
+    "/api/v1/admin/tickets/{ticketId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["commentOnAdminFeedbackTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tickets/{ticketId}/in-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["moveAdminFeedbackTicketToWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tickets/{ticketId}/testing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sendAdminFeedbackTicketToTesting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tickets/{ticketId}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["closeAdminFeedbackTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1158,6 +1350,8 @@ export interface components {
             subtitles: boolean;
             /** @default true */
             sponsorBlock: boolean;
+            /** @description Nearest target height used by archive jobs; explicit format IDs take precedence for downloads */
+            targetHeight?: number | null;
         };
         /** @description Exact Shaka variant selected when recording starts; omitted values select the best available quality */
         LiveRecordingRequest: {
@@ -1261,6 +1455,13 @@ export interface components {
              * @default false
              */
             localFilesAccess: boolean;
+            /** @description Nearest video height for archiving; null selects the best available quality */
+            archiveTargetHeight: number | null;
+            /**
+             * @description Independent preference for feedback-ticket update notifications
+             * @default true
+             */
+            feedbackNotifications: boolean;
         };
         SettingsPatch: {
             autoArchive?: boolean;
@@ -1269,6 +1470,114 @@ export interface components {
             preferBestQuality?: boolean;
             /** @enum {string} */
             theme?: "system" | "light" | "dark";
+            /** @description Null explicitly restores best-quality archiving */
+            archiveTargetHeight?: number | null;
+            feedbackNotifications?: boolean;
+        };
+        FeedbackTicketCreate: {
+            subject: string;
+            description: string;
+            /**
+             * @default Question
+             * @enum {string}
+             */
+            type: "Question" | "Bug" | "Feature" | "Improvement";
+            /**
+             * @default Major
+             * @enum {string}
+             */
+            priority: "Minor" | "Major" | "Critical" | "Blocker";
+        };
+        FeedbackTextRequest: {
+            text: string;
+            /**
+             * Format: uuid
+             * @description Stable client request ID for idempotent comment retries; optional for other text actions
+             */
+            requestId?: string;
+        };
+        FeedbackCloseRequest: {
+            /** @enum {string} */
+            resolution: "Answered" | "Rejected" | "Duplicate";
+            /** @description Required for Duplicate; full UUID or unique UUID prefix of an existing non-duplicate ticket */
+            duplicateOf?: string | null;
+        };
+        FeedbackMetadataPatch: {
+            /** @enum {string} */
+            type?: "Question" | "Bug" | "Feature" | "Improvement";
+            /** @enum {string} */
+            priority?: "Minor" | "Major" | "Critical" | "Blocker";
+        };
+        FeedbackEntry: {
+            /** Format: uuid */
+            id: string;
+            author: string | null;
+            /** @enum {string} */
+            role: "USER" | "ADMIN" | "SYSTEM";
+            /** @enum {string} */
+            kind: "COMMENT" | "SYSTEM" | "REOPEN";
+            text: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        FeedbackTicket: {
+            /** Format: uuid */
+            id: string;
+            /** @description First eight uppercase UUID characters */
+            shortId: string;
+            subject: string;
+            description: string;
+            author: string;
+            /** @enum {string} */
+            type: "Question" | "Bug" | "Feature" | "Improvement";
+            /** @enum {string} */
+            priority: "Minor" | "Major" | "Critical" | "Blocker";
+            /** @enum {string} */
+            status: "Accepted" | "In Progress" | "Testing" | "Done";
+            /** @enum {string|null} */
+            resolution: "Completed" | "Answered" | "Rejected" | "Duplicate" | null;
+            /** Format: uuid */
+            duplicateOf: string | null;
+            duplicateSubject: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            entries: components["schemas"]["FeedbackEntry"][];
+        };
+        ArchiveFilter: {
+            /**
+             * @default AND
+             * @enum {string}
+             */
+            mode: "AND" | "OR";
+            likes?: components["schemas"]["ArchiveNumericFilter"];
+            views?: components["schemas"]["ArchiveNumericFilter"];
+            publishedAt?: components["schemas"]["ArchiveDateFilter"];
+        };
+        ArchiveNumericFilter: {
+            /** Format: int64 */
+            exact?: number | null;
+            /** Format: int64 */
+            minimum?: number | null;
+            /** Format: int64 */
+            maximum?: number | null;
+            /** @default true */
+            minimumInclusive: boolean;
+            /** @default true */
+            maximumInclusive: boolean;
+        };
+        ArchiveDateFilter: {
+            /** Format: date-time */
+            exact?: string | null;
+            /** Format: date-time */
+            minimum?: string | null;
+            /** Format: date-time */
+            maximum?: string | null;
+            /** @default true */
+            minimumInclusive: boolean;
+            /** @default true */
+            maximumInclusive: boolean;
         };
         ArchiveEstimateRequest: {
             /** @enum {string} */
@@ -1279,6 +1588,10 @@ export interface components {
              * @description Optional client-generated id used for SSE estimation progress and cancellation
              */
             estimateId?: string;
+            /** @description AND/OR conditions evaluated from video metadata before selection; omitted filter archives all videos */
+            filter?: components["schemas"]["ArchiveFilter"];
+            /** @description Per-operation nearest video height; omitted uses the saved user default */
+            targetHeight?: number | null;
         };
         ArchiveEstimate: {
             /** Format: uuid */
@@ -1303,6 +1616,8 @@ export interface components {
             /** Format: int64 */
             audioBps: number;
             skippedVideoCount: number;
+            /** @description Videos excluded by the active archive filter */
+            filteredVideoCount: number;
             skippedVideos: components["schemas"]["SkippedVideo"][];
             videoIds: string[];
             /** Format: date-time */
@@ -1352,6 +1667,8 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             skippedVideoCount: number;
+            /** @description Videos excluded by the active archive filter */
+            filteredVideoCount: number;
             skippedVideos: components["schemas"]["SkippedVideo"][];
         };
         SkippedVideo: {
@@ -1519,6 +1836,7 @@ export interface components {
         ChannelId: string;
         PlaylistId: string;
         Username: string;
+        TicketId: string;
     };
     requestBodies: never;
     headers: never;
@@ -3089,6 +3407,359 @@ export interface operations {
                     "application/json": components["schemas"]["StorageResponse"];
                 };
             };
+        };
+    };
+    listFeedbackTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tickets authored by or shared with the current user; administrators can see all tickets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"][];
+                };
+            };
+        };
+    };
+    createFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackTicketCreate"];
+            };
+        };
+        responses: {
+            /** @description Ticket created in Accepted status */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    getFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Full ticket and chronological discussion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    commentOnFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackTextRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated ticket; repeating the same requestId returns it without adding another comment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    confirmFeedbackFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Testing ticket confirmed and closed with Completed resolution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    reopenFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackTextRequest"];
+            };
+        };
+        responses: {
+            /** @description Completed or Answered ticket returned to Accepted with the reason preserved in history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    streamFeedbackEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE ready, ticket and ping events; ticket data contains its UUID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    listAdminFeedbackTickets: {
+        parameters: {
+            query?: {
+                query?: string;
+                status?: "Accepted" | "In Progress" | "Testing" | "Done";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Administrator ticket queue ordered by update time */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"][];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    getAdminFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Full administrator ticket card */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    changeAdminFeedbackTicketTypeAndPriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackMetadataPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated ticket with a system history entry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    commentOnAdminFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackTextRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated ticket; requestId makes network retries idempotent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    moveAdminFeedbackTicketToWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted or Testing ticket moved to In Progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    sendAdminFeedbackTicketToTesting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description In Progress ticket sent for user verification */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    closeAdminFeedbackTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketId: components["parameters"]["TicketId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket closed; duplicate access grants and history are committed atomically */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackTicket"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }

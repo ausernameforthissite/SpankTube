@@ -7,6 +7,8 @@ import type { components } from "./api/schema";
 import { DownloadMenu, type DownloadOptions } from "./DownloadMenu";
 import { HistoryMenu } from "./HistoryMenu";
 import { FileBrowser } from "./FileBrowser";
+import { FeedbackPage } from "./FeedbackPage";
+import { AdminTicketsPage } from "./AdminTicketsPage";
 import { LibraryView } from "./LibraryView";
 import { LazyThumbnail } from "./LazyThumbnail";
 import { Pagination } from "./Pagination";
@@ -20,8 +22,9 @@ import { UserMenu } from "./UserMenu";
 import { usePlaybackLogs } from "./usePlaybackLogs";
 import { useQueue } from "./useQueue";
 import { useLiveRecording } from "./useLiveRecording";
+import { useFeedbackEvents } from "./useFeedbackEvents";
 import { VideoDescription } from "./VideoDescription";
-import type { ApiFetch, ArchiveAvailability, ArchiveEstimate, ArchiveEstimateProgress, ArchiveVersion, ChannelArchiveStatus, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserPlaylist, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
+import type { ApiFetch, ArchiveAvailability, ArchiveEstimate, ArchiveEstimateProgress, ArchiveFilter, ArchiveVersion, ChannelArchiveStatus, LibraryItem, LibraryLocation, LibraryResponse, QueueJob, UserPlaylist, UserSettings, VideoFormat, WatchProgress, WatchProgressMap } from "./types";
 
 type TokenPair = components["schemas"]["TokenPair"];
 type BaseVideo = components["schemas"]["Video"];
@@ -333,7 +336,8 @@ export default function App() {
   const [users, setUsers] = useState<UserQuota[]>([]);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<UserSettings>({ autoArchive: true, autoplay: true,
-    hideTechnicalDetails: false, preferBestQuality: true, theme: "system", localFilesAccess: false });
+    hideTechnicalDetails: false, preferBestQuality: true, theme: "system", localFilesAccess: false,
+    archiveTargetHeight: null, feedbackNotifications: true });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [watchProgress, setWatchProgress] = useState<WatchProgressMap>({});
   const watchProgressRef = useRef(watchProgress);
@@ -539,14 +543,30 @@ export default function App() {
     Boolean(session) && loading && !archiveFile && metadataSupported, apiFetch, "metadata");
   const journalLines = [...playbackLogs, ...loadTimings];
 
-  const notify = useCallback((message: string) => {
+  const notify = useCallback((message: string, url?: string) => {
     document.getElementById("spanktube-toast")?.remove();
     const element = document.createElement("div");
     element.id = "spanktube-toast";
     element.className = "toast";
     element.style.cssText = "position:fixed;top:40px;left:50%;transform:translateX(-50%);z-index:1100;max-width:min(520px,calc(100vw - 32px));padding:13px 18px;border:1px solid #586c9b;border-radius:10px;color:#edf2ff;background:#263452;box-shadow:0 8px 32px #0008;margin:0;display:block;visibility:visible;opacity:1;";
-    element.setAttribute("role", "status");
-    element.textContent = message;
+    element.setAttribute("role", url ? "link" : "status");
+    element.textContent = url ? `${message} Открыть тикет` : message;
+    if (url) {
+      element.tabIndex = 0;
+      element.style.cursor = "pointer";
+      const open = () => {
+        window.history.pushState({}, "", url);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        element.remove();
+      };
+      element.addEventListener("click", open);
+      element.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
+      });
+    }
     document.body.appendChild(element);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => element.remove(), 5000);
@@ -580,6 +600,12 @@ export default function App() {
     window.scrollTo(0, 0);
   }, []);
 
+  const feedbackRevision = useFeedbackEvents(Boolean(session), apiFetch, useCallback((ticketId: string) => {
+    if (!settings.feedbackNotifications) return;
+    const path = session?.role === "ADMIN" ? "/admin/tickets" : "/feedback";
+    notify(`Тикет ${ticketId.substring(0, 8).toUpperCase()} обновлён.`, `${path}?ticket=${encodeURIComponent(ticketId)}`);
+  }, [settings.feedbackNotifications, session?.role, notify]));
+
   const selectChannelTab = useCallback((tab: ChannelTab) => {
     setChannelTab(tab);
     const params = new URLSearchParams(window.location.search);
@@ -612,7 +638,10 @@ export default function App() {
   }, [location, metadataKey, canOpenPage, navigate]);
 
   useEffect(() => {
-    const listener = () => setLocation(readLocation());
+    const listener = () => {
+      setLocation(readLocation());
+      setPopup(null);
+    };
     window.addEventListener("popstate", listener);
     return () => window.removeEventListener("popstate", listener);
   }, []);
@@ -1319,11 +1348,24 @@ export default function App() {
   }, [apiFetch]);
 
   const saveCollection = async (path: string, kind: "PLAYLIST" | "CHANNEL", title: string, targetId: string,
-    resumeEstimateId?: string) => {
+    resumeEstimateId?: string, filter?: ArchiveFilter, targetHeight?: number | null) => {
     let controller: AbortController | null = null;
     try {
       setError(null);
       if (!resumeEstimateId) stopArchiveEstimate(false);
+      if (!resumeEstimateId && filter === undefined) {
+        setArchiveCandidate({ path, title, kind, targetId });
+        setArchiveEstimate(null);
+        setArchiveEstimateId(null);
+        setArchiveEstimateProgress(null);
+        setArchiveEstimateLoading(false);
+        popupAnchorRef.current = null;
+        const width = Math.min(540, window.innerWidth - 48);
+        setPopupPosition({ left: Math.max(24, (window.innerWidth - width) / 2), top: 66,
+          width, maxHeight: window.innerHeight - 48 });
+        setPopup("archiveEstimate");
+        return;
+      }
       controller = new AbortController();
       archiveEstimateAbortRef.current = controller;
       const estimateId = resumeEstimateId || newEstimateId();
@@ -1339,7 +1381,8 @@ export default function App() {
         width, maxHeight: window.innerHeight - 48 });
       setPopup("archiveEstimate");
       const response = await apiFetch("/api/v1/archive/estimate", {
-        method: "POST", body: JSON.stringify({ kind, targetId, estimateId }), signal: controller.signal,
+        method: "POST", body: JSON.stringify({ kind, targetId, estimateId, filter,
+          ...(targetHeight !== undefined ? { targetHeight } : {}) }), signal: controller.signal,
       });
       if (response.status === 204) {
         if (archiveEstimateActiveRef.current === estimateId) archiveEstimateActiveRef.current = null;
@@ -1401,7 +1444,8 @@ export default function App() {
                 existingVideoCount: next.existingVideoCount, videoBytes: next.videoBytes,
                 audioBytes: next.audioBytes, totalBytes: next.totalBytes,
                 estimatedSeconds: next.estimatedSeconds, videoBps: next.videoBps, audioBps: next.audioBps,
-                skippedVideoCount: next.skippedVideoCount, skippedVideos: next.skippedVideos,
+                skippedVideoCount: next.skippedVideoCount, filteredVideoCount: next.filteredVideoCount,
+                skippedVideos: next.skippedVideos,
               });
               setArchiveEstimateLoading(false);
               if (archiveEstimateActiveRef.current === next.estimateId) archiveEstimateActiveRef.current = null;
@@ -2030,6 +2074,14 @@ export default function App() {
 
       {location.path === "/jobs" && <QueuePanel jobs={jobs} beforeYou={beforeYou} onDownload={downloadJob} onDismiss={dismissJob} onNavigate={navigate} />}
 
+      {location.path === "/feedback" && <FeedbackPage apiFetch={apiFetch} username={session.username}
+        selectedTicketId={location.query.get("ticket")} revision={feedbackRevision} onNavigate={navigate} />}
+
+      {location.path === "/admin/tickets" && (session.role === "ADMIN"
+        ? <AdminTicketsPage apiFetch={apiFetch} username={session.username}
+          selectedTicketId={location.query.get("ticket")} revision={feedbackRevision} onNavigate={navigate} />
+        : <section className="panel metadata"><h2>Тикеты</h2><p>Требуется доступ администратора.</p></section>)}
+
       {localFilesPath !== null && (session.role === "ADMIN" || settings.localFilesAccess
         ? <FileBrowser apiFetch={apiFetch} ensureAccessToken={ensureAccessToken} settings={settings}
           settingsLoaded={settingsLoaded} routePath={localFilesPath} onNavigate={navigate}
@@ -2066,7 +2118,7 @@ export default function App() {
           onNavigate={url => navigate(url, true)} onClose={() => setPopup(null)} onClear={clearCompleted} compact />}
         {popup === "download" && video && <DownloadMenu formats={video.formats} onDownload={download} onClose={() => setPopup(null)} />}
         {popup === "settings" && <SettingsMenu settings={settings} onChange={updateSettings} onClose={() => setPopup(null)}
-          avatarUrl={avatarUrl} onAvatarUpload={uploadAvatar} isAdmin={session.role === "ADMIN"}
+          onBack={() => setPopup("user")} onNavigate={navigate} avatarUrl={avatarUrl} onAvatarUpload={uploadAvatar} isAdmin={session.role === "ADMIN"}
           invite={invite} onGenerateInvite={generateInvite} />}
         {popup === "user" && <UserMenu username={session.username} role={session.role} avatarUrl={avatarUrl}
           settings={settings} onChange={updateSettings} onLogout={() => saveSession(null)} onClose={() => setPopup(null)}
@@ -2089,8 +2141,12 @@ export default function App() {
           }}
           onDownload={() => { setPopup(null); void download({ videoFormatId: null, audioFormatId: null, subtitles: true, sponsorBlock: true }, menuVideo.id); }} />}
         {popup === "archiveEstimate" && archiveCandidate && <ArchiveEstimateDialog title={archiveCandidate.title}
-          estimate={archiveEstimate} progress={archiveEstimateProgress}
+          estimate={archiveEstimate} progress={archiveEstimateProgress} defaultTargetHeight={settings.archiveTargetHeight}
           loading={archiveEstimateLoading} onCancel={cancelArchiveEstimate} onRetry={() => void retryArchiveEstimate()}
+          onStart={(filter, targetHeight) => {
+            if (archiveCandidate) void saveCollection(archiveCandidate.path, archiveCandidate.kind,
+              archiveCandidate.title, archiveCandidate.targetId, undefined, filter, targetHeight);
+          }}
           onConfirm={() => void confirmArchiveCollection()} />}
         {popup === "playlistPicker" && <PlaylistPicker playlists={userPlaylists} query={playlistQuery}
           onQuery={setPlaylistQuery} onSelect={playlist => void addToPlaylist(playlist)}

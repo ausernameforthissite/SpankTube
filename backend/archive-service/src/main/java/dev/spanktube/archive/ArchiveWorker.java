@@ -91,7 +91,7 @@ class ArchiveWorker {
             ArchiveModels.DownloadOptions selectedOptions = new ArchiveModels.DownloadOptions(
                     selection.video() == null ? null : selection.video().formatId(),
                     selection.audio() == null ? null : selection.audio().formatId(),
-                    options.subtitles(), options.sponsorBlock());
+                    options.subtitles(), options.sponsorBlock(), options.targetHeight());
             ArchiveModels.DownloadedFile file = downloader.download(download, selectedOptions, directory,
                     selection.estimatedBytes(), progress -> jobs.progress(job.id(), progress));
             jobs.progress(job.id(), new DownloadProgress.Snapshot(ArchiveModels.Stage.FINISHING,

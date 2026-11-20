@@ -64,7 +64,56 @@ export type QueueJob = {
 
 export type QueueSnapshot = { jobs: QueueJob[]; beforeYou: number };
 
+export type FeedbackEntry = {
+  id: string;
+  author: string | null;
+  role: "USER" | "ADMIN" | "SYSTEM";
+  kind: "COMMENT" | "SYSTEM" | "REOPEN";
+  text: string;
+  createdAt: string;
+};
+
+export type FeedbackTicket = {
+  id: string;
+  shortId: string;
+  subject: string;
+  description: string;
+  author: string;
+  type: "Question" | "Bug" | "Feature" | "Improvement";
+  priority: "Minor" | "Major" | "Critical" | "Blocker";
+  status: "Accepted" | "In Progress" | "Testing" | "Done";
+  resolution: "Completed" | "Answered" | "Rejected" | "Duplicate" | null;
+  duplicateOf: string | null;
+  duplicateSubject: string | null;
+  createdAt: string;
+  updatedAt: string;
+  entries: FeedbackEntry[];
+};
+
 export type ArchiveSkippedVideo = { videoId: string; reason: string };
+
+export type ArchiveNumericFilter = {
+  exact: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  minimumInclusive: boolean;
+  maximumInclusive: boolean;
+};
+
+export type ArchiveDateFilter = {
+  exact: string | null;
+  minimum: string | null;
+  maximum: string | null;
+  minimumInclusive: boolean;
+  maximumInclusive: boolean;
+};
+
+export type ArchiveFilter = {
+  mode: "AND" | "OR";
+  likes: ArchiveNumericFilter | null;
+  views: ArchiveNumericFilter | null;
+  publishedAt: ArchiveDateFilter | null;
+};
 
 export type ArchiveEstimate = {
   estimateId: string;
@@ -80,6 +129,7 @@ export type ArchiveEstimate = {
   videoBps: number;
   audioBps: number;
   skippedVideoCount: number;
+  filteredVideoCount: number;
   skippedVideos: ArchiveSkippedVideo[];
 };
 
@@ -108,6 +158,7 @@ export type ArchiveEstimateProgress = {
   createdAt: string;
   updatedAt: string;
   skippedVideoCount: number;
+  filteredVideoCount: number;
   skippedVideos: ArchiveSkippedVideo[];
 };
 
@@ -133,6 +184,8 @@ export type UserSettings = {
   preferBestQuality: boolean;
   theme: "light" | "dark" | "system";
   localFilesAccess: boolean;
+  archiveTargetHeight: number | null;
+  feedbackNotifications: boolean;
 };
 
 export type LibraryItem = {

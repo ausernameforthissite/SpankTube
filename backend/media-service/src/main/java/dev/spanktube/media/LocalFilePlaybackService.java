@@ -45,7 +45,7 @@ class LocalFilePlaybackService {
     }
 
     private Path cacheDirectory(LocalFileService.LocalVideo video) throws IOException {
-        StringBuilder signature = new StringBuilder("browser-v8\0").append(video.path());
+        StringBuilder signature = new StringBuilder("browser-v11\0").append(video.path());
         appendSignature(signature, video.source());
         for (Path subtitle : video.subtitles()) {
             appendSignature(signature, subtitle);
