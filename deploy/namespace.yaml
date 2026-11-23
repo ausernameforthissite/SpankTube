@@ -4,3 +4,5 @@ metadata:
   name: spanktube
   labels:
     app.kubernetes.io/part-of: spanktube
+    # kubernetes-replicator (mittwald) copies the wildcard duckdns TLS secret here
+    copy-wild-cert: main

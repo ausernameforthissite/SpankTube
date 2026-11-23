@@ -287,6 +287,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(loadSession);
   const sessionRef = useRef(session);
   const refreshRef = useRef<Promise<string> | null>(null);
+  const activityRef = useRef<string | null>(null);
   const [username, setUsername] = useState("viewer");
   const [password, setPassword] = useState("");
   const [registration, setRegistration] = useState(false);
@@ -440,6 +441,7 @@ export default function App() {
       if (!latest) throw new RequestError("Сначала войдите в аккаунт");
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: latest.refreshToken }),
       });
@@ -457,6 +459,22 @@ export default function App() {
       refreshRef.current = null;
     }
   }, [acceptTokens, saveSession]);
+
+  useEffect(() => {
+    const current = session;
+    if (!current) {
+      activityRef.current = null;
+      return;
+    }
+    if (activityRef.current === current.refreshToken) return;
+    activityRef.current = current.refreshToken;
+    void fetch(`${API_BASE_URL}/api/v1/auth/activity`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
+    }).then(response => {
+      if (response.status === 401 && sessionRef.current?.refreshToken === current.refreshToken) saveSession(null);
+    }).catch(() => {});
+  }, [session, saveSession]);
 
   const showError = useCallback((reason: unknown) => {
     if (reason instanceof RequestError) {
@@ -1198,6 +1216,15 @@ export default function App() {
     };
   }, [video, videoElement, reportProgress]);
 
+  const logout = useCallback(() => {
+    const current = sessionRef.current;
+    void fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: current?.refreshToken || null }),
+    }).catch(() => {});
+    saveSession(null);
+  }, [saveSession]);
+
   const login = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -1217,6 +1244,7 @@ export default function App() {
       }
       const response = await fetch(`${API_BASE_URL}/api/v1/auth/${registration ? "register" : "login"}`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(registration ? { invite: inviteCode, username, password } : { username, password }),
       });
@@ -2121,7 +2149,7 @@ export default function App() {
           onBack={() => setPopup("user")} onNavigate={navigate} avatarUrl={avatarUrl} onAvatarUpload={uploadAvatar} isAdmin={session.role === "ADMIN"}
           invite={invite} onGenerateInvite={generateInvite} />}
         {popup === "user" && <UserMenu username={session.username} role={session.role} avatarUrl={avatarUrl}
-          settings={settings} onChange={updateSettings} onLogout={() => saveSession(null)} onClose={() => setPopup(null)}
+          settings={settings} onChange={updateSettings} onLogout={logout} onClose={() => setPopup(null)}
           onNavigate={url => {
             if (url === "/settings") setPopup("settings");
             else navigate(url);

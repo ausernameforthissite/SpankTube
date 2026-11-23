@@ -38,6 +38,10 @@ spec:
                 secretKeyRef:
                   name: spanktube-postgres
                   key: password
+            # the block volume is a bare ext4 mount point (contains lost+found);
+            # initdb requires an empty directory, so use a subdirectory
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
@@ -63,6 +67,7 @@ spec:
         name: data
       spec:
         accessModes: [ReadWriteOnce]
+        storageClassName: block
         resources:
           requests:
             storage: 20Gi

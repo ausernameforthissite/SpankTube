@@ -478,10 +478,17 @@ class OnDemandDashService {
     private String run(List<String> command, Duration timeout) {
         Process process = null;
         try {
-            process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            process = new ProcessBuilder(command).start();
             final Process running = process;
-            var outputReader = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var stdoutReader = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try (var input = running.getInputStream()) {
+                    return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                } catch (IOException error) {
+                    return error.getMessage();
+                }
+            });
+            var stderrReader = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try (var input = running.getErrorStream()) {
                     return new String(input.readAllBytes(), StandardCharsets.UTF_8);
                 } catch (IOException error) {
                     return error.getMessage();
@@ -491,9 +498,12 @@ class OnDemandDashService {
                 process.destroyForcibly();
                 throw new IOException("Media process timed out");
             }
-            String output = outputReader.get(2, TimeUnit.SECONDS);
+            String output = stdoutReader.get(2, TimeUnit.SECONDS);
+            String error = stderrReader.get(2, TimeUnit.SECONDS);
             if (process.exitValue() != 0) {
-                throw new IOException("Media process failed: " + output.substring(0, Math.min(4000, output.length())));
+                String details = error == null || error.isBlank() ? output : error;
+                throw new IOException("Media process failed: "
+                        + details.substring(0, Math.min(4000, details.length())));
             }
             return output;
         } catch (IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException error) {
@@ -734,30 +744,44 @@ class OnDemandDashService {
     }
 
     private static List<Long> findTfdt(RandomAccessFile output) throws IOException {
-        byte[] expected = {'t', 'f', 'd', 't'};
-        byte[] buffer = new byte[64 * 1024];
         List<Long> result = new ArrayList<>();
-        long base = 0;
-        int matched = 0;
-        int count;
-        while ((count = output.read(buffer)) >= 0) {
-            for (int index = 0; index < count; index++) {
-                if (buffer[index] == expected[matched]) {
-                    matched++;
-                    if (matched == expected.length) {
-                        result.add(base + index - 3);
-                        matched = 0;
-                    }
-                } else {
-                    matched = buffer[index] == expected[0] ? 1 : 0;
-                }
-            }
-            base += count;
-        }
+        collectTfdt(output, 0, output.length(), 0, result);
         if (result.isEmpty()) {
             throw new IOException("Media fragment has no tfdt box");
         }
         return result;
+    }
+
+    private static void collectTfdt(RandomAccessFile input, long start, long end, int depth,
+            List<Long> result) throws IOException {
+        if (depth > 4 || end - start < 8) {
+            return;
+        }
+        long position = start;
+        while (position + 8 <= end) {
+            input.seek(position);
+            long size32 = Integer.toUnsignedLong(input.readInt());
+            byte[] type = new byte[4];
+            input.readFully(type);
+            long header = 8;
+            long size = size32;
+            if (size32 == 1) {
+                size = input.readLong();
+                header = 16;
+            } else if (size32 == 0) {
+                size = end - position;
+            }
+            if (size < header || position + size > end) {
+                throw new IOException("Invalid MP4 box in media fragment");
+            }
+            String name = new String(type, StandardCharsets.ISO_8859_1);
+            if ("tfdt".equals(name)) {
+                result.add(position + 4);
+            } else if ("moof".equals(name) || "traf".equals(name)) {
+                collectTfdt(input, position + header, position + size, depth + 1, result);
+            }
+            position += size;
+        }
     }
 
     private static boolean fresh(Path file, Path source) throws IOException {

@@ -20,6 +20,27 @@ class OnDemandDashServiceTest {
     Path directory;
 
     @Test
+    void probeIgnoresFfprobeStderrWarnings() throws Exception {
+        Path ffprobe = directory.resolve("ffprobe");
+        Files.writeString(ffprobe, """
+                #!/bin/sh
+                echo '[mpeg2video @ 0000] ignoring pic cod ext after 0' >&2
+                printf '%s' '{"format":{"duration":"10.5","size":"1000"},"streams":[{"codec_type":"video","codec_name":"mpeg2video","profile":"Main","level":8,"width":720,"height":480,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","tags":{"language":"jpn"}},{"codec_type":"audio","codec_name":"aac","sample_rate":"48000","channels":2,"tags":{"language":"jpn"}}],"frames":[{"best_effort_timestamp_time":"0.000000"},{"best_effort_timestamp_time":"2.000000"}]}'
+                """);
+        Files.setPosixFilePermissions(ffprobe,
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        OnDemandDashService service = new OnDemandDashService(
+                mock(PlaybackLogService.class), new ObjectMapper(), "ffmpeg", ffprobe.toString());
+        Path source = Files.writeString(directory.resolve("source.mkv"), "source");
+
+        OnDemandDashService.MediaIndex index = service.probe(source);
+
+        assertThat(index.keyframes()).containsExactly(0.0, 2.0);
+        assertThat(index.duration()).isEqualTo(10.5);
+        assertThat(index.video().codec()).isEqualTo("mpeg2video");
+    }
+
+    @Test
     void createsOnlyRequestedFragmentsAndCachesThem() throws Exception {
         Path source = Files.writeString(directory.resolve("source.mkv"), "source");
         Path cache = directory.resolve("cache");
@@ -171,29 +192,54 @@ class OnDemandDashServiceTest {
     @Test
     void normalizesFragmentDecodeTimeInItsActualTimescale() throws Exception {
         Path fragment = directory.resolve("fragment.m4s");
-        var output = new java.io.DataOutputStream(Files.newOutputStream(fragment));
-        output.writeInt(20);
-        output.writeBytes("tfdt");
-        output.writeByte(1);
-        output.writeByte(0);
-        output.writeShort(0);
-        output.writeLong(-23);
-        output.close();
+        writeFragment(fragment, List.of(-23L), List.of());
 
         OnDemandDashService.normalizeTfdt(fragment, 1.001, 48_000);
 
         byte[] bytes = Files.readAllBytes(fragment);
         int type = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1).indexOf("tfdt");
-        assertThat(type).isEqualTo(4);
-        assertThat(java.nio.ByteBuffer.wrap(bytes, 12, 8).getLong()).isEqualTo(48_048);
-        assertThat(bytes).hasSize(20);
+        assertThat(type).isEqualTo(44);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 52, 8).getLong()).isEqualTo(48_048);
     }
 
     @Test
     void normalizesEveryFragmentWithTheSameDelta() throws Exception {
         Path fragment = directory.resolve("multiple.m4s");
-        var output = new java.io.DataOutputStream(Files.newOutputStream(fragment));
-        for (long value : List.of(455_789L, 458_792L)) {
+        writeFragment(fragment, List.of(455_789L, 458_792L), List.of());
+
+        OnDemandDashService.normalizeTfdt(fragment, 10.928, 1000);
+
+        byte[] bytes = Files.readAllBytes(fragment);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 52, 8).getLong()).isEqualTo(10_928);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 72, 8).getLong()).isEqualTo(13_931);
+    }
+
+    @Test
+    void ignoresTfdtMarkerInsideMediaPayload() throws Exception {
+        Path fragment = directory.resolve("payload.m4s");
+        writeFragment(fragment, List.of(455_789L), List.of("xxtfdt-tfdt".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)));
+
+        OnDemandDashService.normalizeTfdt(fragment, 10.928, 1000);
+
+        byte[] bytes = Files.readAllBytes(fragment);
+        assertThat(java.nio.ByteBuffer.wrap(bytes, 52, 8).getLong()).isEqualTo(10_928);
+        assertThat(new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1)).contains("xxtfdt-tfdt");
+    }
+
+    private static void writeFragment(Path target, List<Long> decodeTimes, List<byte[]> payloads) throws Exception {
+        var output = new java.io.DataOutputStream(Files.newOutputStream(target));
+        int moofSize = 8 + (8 + 4) + trafSize(decodeTimes);
+        output.writeInt(moofSize);
+        output.writeBytes("moof");
+        output.writeInt(12);
+        output.writeBytes("mfhd");
+        output.writeInt(0);
+        output.writeInt(trafSize(decodeTimes));
+        output.writeBytes("traf");
+        output.writeInt(8 + 4);
+        output.writeBytes("tfhd");
+        output.writeInt(0);
+        for (long value : decodeTimes) {
             output.writeInt(20);
             output.writeBytes("tfdt");
             output.writeByte(1);
@@ -201,13 +247,16 @@ class OnDemandDashServiceTest {
             output.writeShort(0);
             output.writeLong(value);
         }
+        for (byte[] payload : payloads) {
+            output.writeInt(8 + payload.length);
+            output.writeBytes("mdat");
+            output.write(payload);
+        }
         output.close();
+    }
 
-        OnDemandDashService.normalizeTfdt(fragment, 10.928, 1000);
-
-        byte[] bytes = Files.readAllBytes(fragment);
-        assertThat(java.nio.ByteBuffer.wrap(bytes, 12, 8).getLong()).isEqualTo(10_928);
-        assertThat(java.nio.ByteBuffer.wrap(bytes, 32, 8).getLong()).isEqualTo(13_931);
+    private static int trafSize(List<Long> decodeTimes) {
+        return 8 + (8 + 4) + decodeTimes.size() * 20;
     }
 
     @Test

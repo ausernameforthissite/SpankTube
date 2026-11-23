@@ -3,10 +3,18 @@ kind: Ingress
 metadata:
   name: spanktube
   namespace: spanktube
+  annotations:
+    # ceiling for MPD (15 min progressive remux), metadata (120 s) and archive estimate
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - spanktube.fulldungeon.duckdns.org
+      secretName: main-wildcard-at-duckdns
   rules:
-    - host: spanktube.example.com
+    - host: spanktube.fulldungeon.duckdns.org
       http:
         paths:
           - path: /
@@ -16,23 +24,46 @@ spec:
                 name: web
                 port:
                   number: 80
-    - host: api.spanktube.example.com
+---
+# SSE streams (queue, estimate progress, feedback): no proxy buffering, long-lived connections
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spanktube-sse
+  namespace: spanktube
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - spanktube.fulldungeon.duckdns.org
+      secretName: main-wildcard-at-duckdns
+  rules:
+    - host: spanktube.fulldungeon.duckdns.org
       http:
         paths:
-          - path: /
+          - path: /api/v1/archive/events
             pathType: Prefix
             backend:
               service:
-                name: gateway
+                name: web
                 port:
-                  number: 8080
-    - host: media.spanktube.example.com
-      http:
-        paths:
-          - path: /media
+                  number: 80
+          - path: /api/v1/archive/estimate
             pathType: Prefix
             backend:
               service:
-                name: gateway
+                name: web
                 port:
-                  number: 8080
+                  number: 80
+          - path: /api/v1/feedback/events
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80

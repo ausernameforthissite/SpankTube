@@ -1,6 +1,6 @@
 # Безопасность, данные и API
 
-> Тематический справочник по части приложения. Исходные разделы: 10, 11, 12, 13, 14, 59.
+> Тематический справочник по части приложения. Разделы: 10–14, 59, 101, 108, 117.
 
 ## 10. Подписки и лента
 
@@ -79,7 +79,7 @@ GET  /admin/storage                      # админ: NFS и квоты пол�
 
 ## 59. Пустые архивные плейлисты в библиотеке
 
-- У `viewer` после удаления всех видео остались архивные плейлисты без элементов. `LEFT JOIN` в `CatalogRepository.playlists` возвращал `{NULL}` в `video_ids`, а `List.of((String[]) ids.getArray())` запрещает null-элементы, поэтому `GET /api/v1/library` падал с `NullPointerException` и HTTP `500`.
+- У `viewer` после удаления всех видео остались архивные плейлисты без элементов. `LEFT JOIN` в `CatalogRepository.playlists` возвращал `{NULL}` в `video_ids`, то есть Java-список `[NULL]` после `getArray()`, а `List.of((String[]) ids.getArray())` запрещает null-элементы, поэтому `GET /api/v1/library` падал с `NullPointerException` и HTTP `500`.
 - SQL теперь использует `coalesce(array_agg(distinct lpi.video_id) filter (where lpi.video_id is not null), '{}')`, поэтому пустой плейлист получает пустой массив. Маппер дополнительно фильтрует null-ID перед `toList`, чтобы не допустить повторение ошибки при любом массиве с null. Пустые плейлисты, их названия, thumbnails и права доступа не изменяются, записи пользователей не удаляются.
 - `CatalogRepositoryTest.emptyArchivePlaylistDoesNotContainNullVideoIds` моделирует ответ `{NULL}` и проверяет пустой список видео и сохранение thumbnail. Полный `./gradlew build` проходит. Новая SQL-выборка на данных `viewer` возвращает `{}` для обоих проблемных плейлистов.
 
@@ -99,3 +99,11 @@ GET  /admin/storage                      # админ: NFS и квоты пол�
 - Комментарии принимают клиентский UUID `requestId`. Уникальный `client_request_id` и `insert ... on conflict do nothing` делают повтор после потери ответа идемпотентным: тот же author/ticket/text возвращает текущий тикет без второго комментария и события, а reuse с другим содержимым получает `409`. `user_settings.feedback_notifications=true` — отдельная настройка уведомлений.
 - `FeedbackEvents` отправляет `ready/ticket/ping` по SSE после commit, только участникам и администраторам; gateway отключает response timeout для `/api/v1/feedback/events`, nginx отключает buffering. `FeedbackServiceTest` покрывает ACL, недопустимые переходы, подтверждение, reopen, duplicate grants/self-reference и отсутствие повторного события при retry. Все feedback/admin endpoints и модели добавлены в `stage2.yaml`.
 - Реальная PostgreSQL-приёмка выявила в close SQL nullable UUID inference и неправильный порядок параметров. Исправлены `duplicate_of = cast(? as uuid)` и порядок `resolution, original, id`; тест дополнительно фиксирует оба. Через публичный gateway с двумя временными VIEWER и временным ADMIN подтверждены полный `Done/Completed`, reopen в `Accepted` со старой историей, изоляция до Duplicate и доступ обоих к оригиналу после него, новый admin reply у обоих, SSE и Answered/null. Комментарий отправлен raw TCP с разрывом после записи, затем повторён тем же `requestId` дважды: в истории ровно одна запись; reuse с другим текстом получил `409`. Отдельная notification setting выключается/включается через API. Все временные пользователи, инвайты, тикеты, ACL и history удалены; контрольные counts равны нулю.
+
+## 117. Персистентные сессии со sliding expiration на один год
+
+- Refresh-сессии больше не находятся только в памяти: `refresh_sessions` в users PostgreSQL содержит SHA-256 `token_hash`, username, created_at, last_used_at и expires_at. Сырой refresh token в БД не записывается. `RefreshTokenService` сохраняет/читает записи через JDBC Timestamp, поэтому restart/recreate user-service не отзывает сессию.
+- `REFRESH_TOKEN_TTL` по умолчанию `P365D`. При issue и rotation новая запись получает год; `POST /auth/activity` без смены token обновляет last_used_at и устанавливает expires_at на год от текущей активности. Rotation транзакционно удаляет старый hash перед выдачей нового, неизвестные/expired получают 401. Expired записи удаляются при issue, password reset по-прежнему вызывает revokeUser.
+- Login/register/refresh возвращают прежний TokenPair и дополнительно persistent `spanktube_session` cookie с refresh token, `Max-Age=31536000`, `Path=/api/v1/auth`, HttpOnly и SameSite=Lax. Cookie работает на текущем HTTP deployment; Secure не добавляется до HTTPS. Refresh/activity/logout принимают JSON refreshToken либо cookie fallback. Logout удаляет текущую серверную сессию и отвечает cookie `Max-Age=0`; password reset также очищает cookie. Gateway разрешает auth activity/logout и уже имеет allowCredentials=true.
+- `RefreshTokenServiceTest`, `SessionCookiesTest` и `AuthControllerTest` проверяют hash-only persistence, год, sliding renewal, expired/unknown rejection, cookie attributes, cookie-only refresh/activity и logout. OpenAPI обновлён для optional refresh body и новых endpoint.
+- Production Chrome-приёмка подтвердила `Max-Age=31536000`, persistent/HttpOnly cookie, sliding `expires_at - last_used_at = 31536000` в PostgreSQL и renewal при page reload. После реального `restart user-service` refresh только по cookie вернул `200`, refresh token сменился, повторный reload сохранил пользователя. «Выйти» очистил cookie. Временный пользователь, invite и refresh_sessions удалены.

@@ -22,7 +22,7 @@ public record AuthProperties(
             accessTokenTtl = Duration.ofMinutes(15);
         }
         if (refreshTokenTtl == null) {
-            refreshTokenTtl = Duration.ofDays(30);
+            refreshTokenTtl = Duration.ofDays(365);
         }
         if (users == null) {
             users = Map.of();

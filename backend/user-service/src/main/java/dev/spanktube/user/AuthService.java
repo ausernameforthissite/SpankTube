@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -33,6 +34,7 @@ class AuthService {
         return issueTokens(username, account.role());
     }
 
+    @Transactional
     TokenPair refresh(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is required");
@@ -43,6 +45,14 @@ class AuthService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User no longer exists");
         }
         return issueTokens(username, account.role());
+    }
+
+    void activity(String refreshToken) {
+        refreshTokenService.touch(refreshToken);
+    }
+
+    void logout(String refreshToken) {
+        refreshTokenService.revoke(refreshToken);
     }
 
     boolean accountExists(String username) {

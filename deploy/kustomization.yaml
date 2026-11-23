@@ -10,9 +10,12 @@ resources:
   - local-files-pv.yaml
   - gateway.yaml
   - user-service.yaml
-  - youtube-upstream-service.yaml
   - catalog-service.yaml
   - archive-service.yaml
-  - media-service.yaml
+  - web-nginx.yaml
   - web.yaml
+  - lan-services.yaml
   - ingress.yaml
+# Note: youtube-upstream-service, media-service and the shared redis run on the
+# Docker egress box (CT 138, default gateway b4) and are intentionally not part
+# of this kustomization; see docs/design (Kubernetes deployment section).

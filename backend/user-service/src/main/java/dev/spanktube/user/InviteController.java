@@ -2,6 +2,7 @@ package dev.spanktube.user;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -16,9 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 class InviteController {
 
     private final InviteService invites;
+    private final SessionCookies cookies;
 
-    InviteController(InviteService invites) {
+    InviteController(InviteService invites, SessionCookies cookies) {
         this.invites = invites;
+        this.cookies = cookies;
     }
 
     @PostMapping("/api/v1/invites")
@@ -34,8 +37,10 @@ class InviteController {
     }
 
     @PostMapping("/api/v1/auth/register")
-    AuthService.TokenPair register(@RequestBody RegistrationRequest request) {
-        return invites.register(request.invite(), request.username(), request.password());
+    AuthService.TokenPair register(@RequestBody RegistrationRequest request, HttpServletResponse response) {
+        AuthService.TokenPair tokens = invites.register(request.invite(), request.username(), request.password());
+        cookies.set(response, tokens.refreshToken());
+        return tokens;
     }
 
     @PostMapping("/api/v1/admin/users/{username}/password-reset-invite")
@@ -45,8 +50,9 @@ class InviteController {
     }
 
     @PostMapping("/api/v1/auth/password-reset")
-    ResponseEntity<Void> resetPassword(@RequestBody PasswordResetRequest request) {
+    ResponseEntity<Void> resetPassword(@RequestBody PasswordResetRequest request, HttpServletResponse response) {
         invites.resetPassword(request.invite(), request.password());
+        cookies.clear(response);
         return ResponseEntity.noContent().build();
     }
 

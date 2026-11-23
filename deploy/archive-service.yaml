@@ -17,7 +17,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: archive-service
-          image: registry.local/spanktube/archive-service:0.2.0
+          image: docker.io/spanktube/archive-service:0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8085
@@ -29,6 +29,8 @@ spec:
           env:
             - name: POSTGRES_HOST
               value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
             - name: POSTGRES_DB
               value: archive
             - name: POSTGRES_USER
@@ -48,9 +50,9 @@ spec:
                   name: spanktube-rabbitmq
                   key: password
             - name: UPSTREAM_SERVICE_URL
-              value: http://youtube-upstream-service:8081
+              value: http://192.168.88.172:8081
             - name: MEDIA_SERVICE_URL
-              value: http://media-service:8082
+              value: http://192.168.88.172:8082
             - name: CATALOG_SERVICE_URL
               value: http://catalog-service:8084
             - name: USER_SERVICE_URL

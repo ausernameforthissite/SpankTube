@@ -25,7 +25,7 @@ spanktube:
     private-key: ${JWT_PRIVATE_KEY:}
     public-key: ${JWT_PUBLIC_KEY:}
     access-token-ttl: PT15M
-    refresh-token-ttl: P30D
+    refresh-token-ttl: ${REFRESH_TOKEN_TTL:P365D}
     users:
       viewer:
         password-hash: ${VIEWER_PASSWORD_HASH:}

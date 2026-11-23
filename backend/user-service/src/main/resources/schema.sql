@@ -74,3 +74,14 @@ create unique index if not exists feedback_ticket_entries_request on feedback_ti
 create index if not exists feedback_ticket_access_user on feedback_ticket_access(username, ticket_id);
 create index if not exists feedback_ticket_entries_thread on feedback_ticket_entries(ticket_id, created_at, id);
 create index if not exists feedback_tickets_updated on feedback_tickets(updated_at desc);
+
+create table if not exists refresh_sessions (
+    token_hash text primary key,
+    username text not null,
+    created_at timestamptz not null,
+    last_used_at timestamptz not null,
+    expires_at timestamptz not null
+);
+
+create index if not exists refresh_sessions_expiry on refresh_sessions(expires_at);
+create index if not exists refresh_sessions_user on refresh_sessions(username);

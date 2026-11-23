@@ -53,16 +53,41 @@ paths:
       operationId: refresh
       security: []
       requestBody:
-        required: true
+        required: false
+        description: JSON refresh token, or the persistent spanktube_session cookie when omitted
         content:
           application/json:
             schema: { $ref: '#/components/schemas/RefreshRequest' }
       responses:
         '200':
-          description: Rotated token pair
+          description: Rotated token pair and renewed one-year persistent session cookie
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
+  /api/v1/auth/activity:
+    post:
+      operationId: renewSessionActivity
+      security: []
+      requestBody:
+        required: false
+        description: JSON refresh token, or the spanktube_session cookie when omitted
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Session last-used time and one-year sliding expiration renewed without token rotation }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutSession
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Current persisted refresh session revoked and cookie cleared }
   /api/v1/videos/{videoId}:
     get:
       operationId: getStage2Video
@@ -1159,9 +1184,8 @@ components:
         password: { type: string, format: password, minLength: 8, maxLength: 128 }
     RefreshRequest:
       type: object
-      required: [refreshToken]
       properties:
-        refreshToken: { type: string }
+        refreshToken: { type: string, description: Optional when the spanktube_session cookie is available }
     TokenPair:
       type: object
       required: [accessToken, tokenType, expiresIn, refreshToken, refreshExpiresIn, role]

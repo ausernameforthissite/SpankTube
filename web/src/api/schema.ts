@@ -68,6 +68,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["renewSessionActivity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["logoutSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{videoId}": {
         parameters: {
             query?: never;
@@ -1113,7 +1145,8 @@ export interface components {
             password: string;
         };
         RefreshRequest: {
-            refreshToken: string;
+            /** @description Optional when the spanktube_session cookie is available */
+            refreshToken?: string;
         };
         TokenPair: {
             accessToken: string;
@@ -1925,13 +1958,14 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        /** @description JSON refresh token, or the persistent spanktube_session cookie when omitted */
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["RefreshRequest"];
             };
         };
         responses: {
-            /** @description Rotated token pair */
+            /** @description Rotated token pair and renewed one-year persistent session cookie */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1939,6 +1973,52 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TokenPair"];
                 };
+            };
+        };
+    };
+    renewSessionActivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description JSON refresh token, or the spanktube_session cookie when omitted */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Session last-used time and one-year sliding expiration renewed without token rotation */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    logoutSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Current persisted refresh session revoked and cookie cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
